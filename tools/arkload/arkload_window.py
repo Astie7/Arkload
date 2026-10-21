@@ -454,6 +454,9 @@ class DetailsPanel(QWidget):
                 "verification_failed": "Verification failed", "failed": "Failed",
                 "downloading": "Downloading", "pending": "Queued",
             }.get(item.status, item.status)
+            if state == "Verified" and getattr(record, "backend", "arkload") != "arkload":
+                # the JDownloader engine does not check a hash against the source
+                state = "Downloaded"
             self.progress_list.addTopLevelItem(
                 QTreeWidgetItem([item.path, fmt_size(item.size), state]))
 

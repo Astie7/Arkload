@@ -175,7 +175,49 @@ non-commercial use** - a commercial use needs a licence from AppWork GmbH. A red
 built on the engine would therefore be **AGPL-3.0** (or commercially licensed), and the attribution
 and the corresponding source would have to travel with it.
 
+## 2.6 The engine behind the window
+
+The JDownloader 2 engine (section 2.5) runs **inside** ArkLoad, not next to it:
+
+* it is started with `-Djava.awt.headless=true`, so **no JDownloader window is ever shown** -
+  ArkLoad is the only interface the user sees (`docs/screenshots/arkload-jdownloader-engine.png`
+  is the ArkLoad window while the engine downloads a file),
+* it is reached through the local API of the engine (port 3128, bound to localhost),
+* ArkLoad starts it in a thread, so the window never waits for the JVM; a link that is added
+  while the engine is still starting waits in the queue,
+* it is stopped again when ArkLoad closes (only when ArkLoad started it).
+
+The protocol (all of it verified against the running engine):
+
+| Call | What it does |
+|---|---|
+| `downloads/queryPackages` | the packages of the download list, with their size and the number of files |
+| `linkcollector/queryPackages` | the packages of the link collector |
+| `linkcollector/queryLinks` | the links that are not started yet, with their sizes |
+| `linkcollector/addLinks` | hands a link over, together with the folder it belongs into |
+| `linkcollector/startDownloads` | starts the collected links |
+| `downloads/enableLinks` / `disableLinks` / `removeLinks` | resume, pause and remove a task |
+
+The parameters go over the wire as a JSON object in `queryParams`; the task ids go as one JSON
+array (`linkIds=[1,2]`).
+
+**How a download runs:**
+
+1. the link goes into the engine's link collector with the destination folder,
+2. the engine's crawler resolves it; ArkLoad reads the file names and sizes from the collector,
+3. ArkLoad starts the transfer and keeps the ids of the links - that is what the pause, resume
+   and cancel buttons use,
+4. the progress comes from the files on disk (a ``.part`` file counts while the transfer runs),
+   the total from the engine's package.
+
+**The MediaFire downloads are not touched by this**: they keep running on ArkLoad's own engine
+with the SHA-256 verification against MediaFire's own hash.  The routing is in
+``DownloadEngine.engine_of()``: a link a host plugin knows goes to ArkLoad's engine, every other
+link goes to the JDownloader engine.
+
 ## 3. The MediaFire downloader audit (this repository)
+
+
 
 ### 3.1 Structure and entry points
 
