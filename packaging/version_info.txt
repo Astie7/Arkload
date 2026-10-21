@@ -17,7 +17,7 @@ VSVersionInfo(
       [
         StringTable(
           '040904B0',
-          [StringStruct('CompanyName', 'Rehan'),
+          [StringStruct('CompanyName', 'Astie7'),
            StringStruct('FileDescription', 'Modern Download Manager'),
            StringStruct('FileVersion', '1.0.0.0'),
            StringStruct('InternalName', 'ArkLoad'),

@@ -32,9 +32,9 @@ try {
 
     if (-not $SkipOneFile) {
         Step "the single file build"
-        $env:ArkLoad_ONEFILE = "1"
+        $env:ARKLOAD_ONEFILE = "1"
         & $Python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging\arkload.spec
-        Remove-Item Env:\ArkLoad_ONEFILE -ErrorAction SilentlyContinue
+        Remove-Item Env:\ARKLOAD_ONEFILE -ErrorAction SilentlyContinue
         if ($LASTEXITCODE -ne 0) { throw "the single file build failed" }
     }
 

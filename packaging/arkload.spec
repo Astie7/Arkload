@@ -2,7 +2,7 @@
 """PyInstaller build of the ArkLoad desktop application.
 
     pyinstaller packaging/arkload.spec                  -> dist/ArkLoad/  (folder build)
-    ArkLoad_ONEFILE=1 pyinstaller packaging/arkload.spec    -> dist/ArkLoad.exe (single file)
+    ARKLOAD_ONEFILE=1 pyinstaller packaging/arkload.spec  -> dist/ArkLoad.exe (single file)
 
 The user data (settings, download manifests, add-ons) is never written into the build: the
 application uses %LOCALAPPDATA%\\ArkLoad for it.
@@ -15,7 +15,7 @@ ROOT = Path(SPECPATH).resolve().parent   # the repository root
 ASSETS = ROOT / "packaging" / "assets"
 ICON = str(ASSETS / "arkload.ico")
 VERSION_FILE = str(ROOT / "packaging" / "version_info.txt")
-ONEFILE = os.environ.get("ArkLoad_ONEFILE", "").strip() == "1"
+ONEFILE = os.environ.get("ARKLOAD_ONEFILE", "").strip() == "1"
 
 # the application only needs PySide6 and the standard library
 EXCLUDES = [
