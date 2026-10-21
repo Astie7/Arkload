@@ -74,16 +74,22 @@ class DownloadSession(threading.Thread):
         started = time.monotonic()
         spec = self.spec
         try:
-            source = dl.parse_source(spec["url"])
-            self.post("planning", source.kind)
-            plan = dl.make_plan(source, None, None, spec.get("cookies"))
+            resolver = spec.get("resolver")
+            if resolver is not None:
+                plan = resolver(spec["url"])
+                source_kind = "folder" if getattr(plan, "kind", "folder") == "folder" else "file"
+            else:
+                source = dl.parse_source(spec["url"])
+                source_kind = source.kind
+                plan = dl.make_plan(source, None, None, spec.get("cookies"))
+            self.post("planning", source_kind)
 
             patterns = spec.get("patterns") or []
             if patterns and source.kind == "folder":
                 plan.files = [item for item in plan.files if rs.matches_patterns(item.rel, patterns)]
 
             root = Path(spec["dest"]).expanduser()
-            if source.kind == "folder" and spec.get("subfolder", True):
+            if source_kind == "folder" and spec.get("subfolder", True):
                 root = root / (spec.get("name") or plan.root_name)
             root.mkdir(parents=True, exist_ok=True)
             self.post("plan", plan, root, source.kind)

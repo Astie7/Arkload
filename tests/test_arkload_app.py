@@ -45,7 +45,7 @@ def make_record(job_id="a", title="libs", size=100, status=dm.COMPLETE, added=10
                                 title=title, destination="/tmp")
     record.bytes_total = size
     record.status = status
-    record.added = added
+    record.created = added
     return record
 
 

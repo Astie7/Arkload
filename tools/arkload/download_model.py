@@ -6,7 +6,6 @@ updates it, and the tests can drive it without a running Qt application.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
@@ -15,11 +14,13 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt
 
 try:  # package import
     from .. import mediafire_resume as rs
+    from .core import Task
 except ImportError:  # direct script run
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import mediafire_resume as rs  # type: ignore[no-redef]
+    from tools.arkload.core import Task  # type: ignore[no-redef]
 
 #: job level states (mirrors mediafire_resume, plus the "paused" state of the UI)
 QUEUED = rs.JOB_QUEUED
@@ -128,168 +129,8 @@ def fmt_added(timestamp: float) -> str:
     return moment.strftime("%d %b %Y")
 
 
-@dataclass
-class DownloadRecord:
-    """One row in the list: a MediaFire folder or file that is being downloaded."""
-
-    job_id: str
-    url: str
-    title: str
-    destination: str
-    source_kind: str = "folder"
-    source_key: str = ""
-    root: str = ""
-    status: str = QUEUED
-    files: list[rs.FileRecord] = field(default_factory=list)
-    bytes_total: int = 0
-    bytes_done: int = 0
-    speed_down: float = 0.0
-    speed_up: float = 0.0
-    added: float = field(default_factory=time.time)
-    priority: str = PRIORITY_HIGH
-    tags: list[str] = field(default_factory=list)
-    mirrors: list[str] = field(default_factory=list)
-    errors: list[tuple[str, str]] = field(default_factory=list)
-    options: dict = field(default_factory=dict)
-    start_after: float = 0.0
-    verifying: bool = False
-    note: str = ""
-
-    # -- derived values -------------------------------------------------------
-    @property
-    def total_files(self) -> int:
-        return len(self.files)
-
-    @property
-    def verified_files(self) -> int:
-        return sum(1 for item in self.files if item.status == FILE_COMPLETE)
-
-    @property
-    def missing_files(self) -> int:
-        return sum(1 for item in self.files
-                   if item.status in (FILE_MISSING, FILE_INCOMPLETE, FILE_VERIFY_FAILED,
-                                      FILE_FAILED))
-
-    @property
-    def active(self) -> bool:
-        return self.status in (RUNNING, QUEUED)
-
-    @property
-    def percent(self) -> int:
-        if not self.files:
-            return 0
-        if self.bytes_total:
-            return int(100 * min(self.bytes_done, self.bytes_total) / self.bytes_total)
-        return int(100 * self.verified_files / len(self.files))
-
-    @property
-    def is_folder(self) -> bool:
-        return self.source_kind == "folder"
-
-    def status_text(self) -> str:
-        if self.status == RUNNING and self.verifying:
-            return "Verifying"
-        if self.status == RUNNING and self.files:
-            return f"Downloading {self.percent}%"
-        if self.status == COMPLETE:
-            if self.total_files > 1:
-                return f"Completed {self.verified_files}/{self.total_files}"
-            return "Completed"
-        if self.status == INCOMPLETE:
-            return f"Incomplete {self.verified_files}/{self.total_files}"
-        if self.status == PAUSED:
-            return "Paused"
-        if self.status == INTERRUPTED:
-            return "Stopped"
-        if self.status == CANCELLED:
-            return "Stopped"
-        if self.status == FAILED:
-            return "Failed"
-        if self.status == QUEUED and self.start_after:
-            return "Scheduled"
-        return "Queued"
-
-    def status_key(self) -> str:
-        """A sortable key for the status column."""
-        order = {RUNNING: 0, QUEUED: 1, PAUSED: 2, INTERRUPTED: 3, INCOMPLETE: 4,
-                 FAILED: 5, CANCELLED: 6, COMPLETE: 7}
-        return order.get(self.status, 8)
-
-    def matches_search(self, needle: str) -> bool:
-        if not needle:
-            return True
-        needle = needle.casefold()
-        if needle in self.title.casefold() or needle in self.url.casefold():
-            return True
-        return any(needle in item.path.casefold() for item in self.files)
-
-    def matches_filter(self, mode: str) -> bool:
-        if mode in ("", "All files"):
-            return True
-        if mode == "Missing Files":
-            return self.missing_files > 0 or self.status in (INCOMPLETE, FAILED, INTERRUPTED)
-        if mode == "Active":
-            return self.status in (RUNNING, QUEUED)
-        if mode == "Completed":
-            return self.status == COMPLETE
-        if mode == "MediaFire folders":
-            return self.is_folder
-        suffix = Path(self.title).suffix.lower()
-        if mode == "Video":
-            return suffix in (".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv")
-        if mode == "Music":
-            return suffix in (".mp3", ".ogg", ".wav", ".flac", ".m4a", ".opus")
-        return True
-
-    def matches_selection(self, mode: str) -> bool:
-        if mode in ("", "All"):
-            return True
-        if mode == "Downloads only":
-            return self.source_kind == "file"
-        if mode == "Uploads only":
-            return False          # there is no upload feature in this build
-        if mode == "Completed":
-            return self.status == COMPLETE
-        if mode == "Stopped":
-            return self.status in (CANCELLED, FAILED, INCOMPLETE, PAUSED)
-        return True
-
-    def file_type(self) -> str:
-        suffix = Path(self.title).suffix.lower()
-        if self.is_folder:
-            return "folder"
-        if suffix in (".mp4", ".mkv", ".avi", ".mov", ".webm"):
-            return "video"
-        if suffix in (".mp3", ".ogg", ".wav", ".flac", ".m4a"):
-            return "music"
-        return "file"
-
-    def to_dict(self) -> dict:
-        return {
-            "job_id": self.job_id, "url": self.url, "title": self.title,
-            "destination": self.destination, "source_kind": self.source_kind,
-            "source_key": self.source_key, "root": self.root, "status": self.status,
-            "priority": self.priority, "tags": list(self.tags), "mirrors": list(self.mirrors),
-            "start_after": self.start_after,
-            "options": dict(self.options),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "DownloadRecord":
-        record = cls(job_id=str(data.get("job_id") or ""),
-                     url=str(data.get("url") or ""),
-                     title=str(data.get("title") or ""),
-                     destination=str(data.get("destination") or ""),
-                     source_kind=str(data.get("source_kind") or "folder"),
-                     source_key=str(data.get("source_key") or ""),
-                     root=str(data.get("root") or ""))
-        record.status = str(data.get("status") or QUEUED)
-        record.priority = str(data.get("priority") or PRIORITY_HIGH)
-        record.tags = [str(tag) for tag in (data.get("tags") or [])]
-        record.mirrors = [str(item) for item in (data.get("mirrors") or [])]
-        record.start_after = float(data.get("start_after") or 0.0)
-        record.options = dict(data.get("options") or {})
-        return record
+#: the record of a download is the task of the core (one object, one state)
+DownloadRecord = Task
 
 
 class DownloadTableModel(QAbstractTableModel):
@@ -311,6 +152,7 @@ class DownloadTableModel(QAbstractTableModel):
         self.sort_mode = "Newest"
         self.filter_mode = "All files"
         self.selection_mode = "All"
+        self.category = "All downloads"
         self.search_text = ""
         #: optional callable ``record -> QIcon`` used for the file/folder icon
         self.icon_provider = None
@@ -462,7 +304,8 @@ class DownloadTableModel(QAbstractTableModel):
         self._visible = [record for record in self._records
                          if record.matches_search(self.search_text)
                          and record.matches_filter(self.filter_mode)
-                         and record.matches_selection(self.selection_mode)]
+                         and record.matches_selection(self.selection_mode)
+                         and record.matches_category(self.category)]
         self._visible.sort(key=self._sort_key)
         self.endResetModel()
 
@@ -498,6 +341,15 @@ class DownloadTableModel(QAbstractTableModel):
     def set_selection_mode(self, mode: str) -> None:
         self.selection_mode = mode
         self.refresh()
+
+    def set_category(self, category: str) -> None:
+        """The category of the sidebar."""
+        self.category = category
+        self.refresh()
+
+    def count(self, category: str) -> int:
+        """How many downloads a category holds."""
+        return sum(1 for record in self._records if record.matches_category(category))
 
     def set_sort(self, mode: str) -> None:
         self.sort_mode = mode

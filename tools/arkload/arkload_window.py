@@ -23,10 +23,11 @@ from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QKeySequence, QPainter,
                          QPalette, QPainterPath, QPen, QShortcut)
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
-                               QProgressBar, QPushButton, QSizePolicy, QStackedWidget,
-                               QStyledItemDelegate, QStyle, QTableView, QToolButton, QTreeWidget,
-                               QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton,
+                               QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
+                               QTableView, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+                               QWidget)
 
 try:  # package import
     from .. import mediafire_resume as rs
@@ -35,6 +36,7 @@ except ImportError:  # direct script run
     import mediafire_resume as rs  # type: ignore[no-redef]
 
 from . import styles
+from .core import CATEGORIES
 from .addons import AddonManager
 from .browser_extension import write_extension
 from .converter import convert, find_ffmpeg
@@ -636,6 +638,29 @@ class ArkLoadMainWindow(QMainWindow):
         layout.addWidget(toolbar)
         self.toolbar = toolbar
 
+        # the sidebar with the categories, the table on the right
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+
+        sidebar = QFrame()
+        sidebar.setObjectName("Sidebar")
+        sidebar.setFixedWidth(196)
+        side_layout = QVBoxLayout(sidebar)
+        side_layout.setContentsMargins(8, 10, 8, 10)
+        side_layout.setSpacing(2)
+        self.sidebar_list = QListWidget()
+        self.sidebar_list.setObjectName("SidebarList")
+        self.sidebar_list.setFrameShape(QFrame.NoFrame)
+        self.sidebar_list.setFocusPolicy(Qt.StrongFocus)
+        self.sidebar_list.currentRowChanged.connect(self._on_category)
+        for name in CATEGORIES:
+            item = QListWidgetItem(name)
+            self.sidebar_list.addItem(item)
+        side_layout.addWidget(self.sidebar_list, 1)
+        side_layout.addStretch(0)
+        body.addWidget(sidebar)
+
         # download area: the table on top, the drop zone below it
         area = QFrame()
         area.setObjectName("DownloadArea")
@@ -683,7 +708,7 @@ class ArkLoadMainWindow(QMainWindow):
 
         self.drop_zone = DropZone()
         area_layout.addWidget(self.drop_zone, 1)
-        outer.addWidget(area, 1)
+        outer.addLayout(body, 1)
 
         self.details = DetailsPanel()
         self.details.priority_requested.connect(self._show_priority_menu)
@@ -845,15 +870,12 @@ class ArkLoadMainWindow(QMainWindow):
         self._save_settings()
 
     def _restore_downloads(self) -> None:
-        """Bring back the downloads that were in the list when the app was closed."""
-        meta = self.engine.load_meta()
-        for record in self.engine.load_records():
-            saved = meta.get(record.job_id)
-            if saved:
-                record.priority = saved.get("priority", record.priority)
-                record.tags = list(saved.get("tags") or [])
-                record.title = saved.get("title", record.title)
-                record.start_after = float(saved.get("start_after") or 0.0)
+        """Bring back the downloads that were in the list when the app was closed.
+
+        The queue holds the tasks (title, priority, tags, schedule, state); the manifests hold
+        the per file state.
+        """
+        for record in self.engine.load_tasks():
             self.model.add_record(record)
         self.model.set_sort(self.sort_combo.currentText())
         self.model.set_filter(self.filter_combo.currentText())
@@ -880,7 +902,7 @@ class ArkLoadMainWindow(QMainWindow):
         self.model.update_record(job_id)
         record = self.model.record(job_id)
         if record is not None:
-            self.engine.persist_meta(record)
+            self.engine.persist(record)
             self.addons.fire("status_change", record)
         self._update_details()
 
@@ -1648,7 +1670,7 @@ class ArkLoadMainWindow(QMainWindow):
         if dialog.exec() != AddDownloadDialog.Accepted:
             return
         record.url = dialog.accepted_url
-        self.engine.persist_meta(record)
+        self.engine.persist(record)
         self.engine.start_record(record)
         self._on_engine_message("The URL was changed, the download continues")
 
@@ -1761,12 +1783,39 @@ class ArkLoadMainWindow(QMainWindow):
             return styles.make_icon("folder", colours["accent"])
         return styles.make_icon("file", colours["muted"])
 
+    def _on_category(self, row: int) -> None:
+        """The sidebar switches the list between the categories."""
+        if row < 0:
+            return
+        name = CATEGORIES[row] if row < len(CATEGORIES) else "All downloads"
+        if name == "Settings":
+            self._show_preferences()
+            return
+        self.model.set_category(name)
+        self._update_sidebar_counts()
+        self._update_status_bar()
+
+    def _update_sidebar_counts(self) -> None:
+        """Show how many downloads every category holds."""
+        for row, name in enumerate(CATEGORIES):
+            if row >= self.sidebar_list.count():
+                break
+            item = self.sidebar_list.item(row)
+            if item is None:
+                continue
+            if name == "Settings":
+                item.setText(name)
+                continue
+            count = self.model.count(name)
+            item.setText(f"{name}   {count}" if count else name)
+
     def _toggle_table_visibility(self) -> None:
         self.table.setVisible(bool(self.model.records()))
 
     def _on_rows_changed(self, *args) -> None:
         self._toggle_table_visibility()
         self._update_status_bar()
+        self._update_sidebar_counts()
 
     def _save_settings(self) -> None:
         settings = self.settings

@@ -7,7 +7,6 @@ manifest in sync, so the window only ever deals with signals and slots.
 from __future__ import annotations
 
 import dataclasses
-import json
 import os
 import queue
 import shutil
@@ -32,7 +31,9 @@ except ImportError:  # direct script run
     from mediafire_session import DownloadSession  # type: ignore[no-redef]
 
 from . import settings as settings_store
-from .download_model import (COMPLETE, DownloadRecord, INCOMPLETE, RUNNING, records_from_manifests)
+from .core import TaskState, TaskStore
+from .hosts import HostRegistry
+from .download_model import COMPLETE, DownloadRecord, INCOMPLETE, RUNNING
 
 REPO_URL = "https://github.com/Astie7/Arkload"
 ISSUES_URL = f"{REPO_URL}/issues"
@@ -117,6 +118,9 @@ class DownloadEngine(QObject):
         # and the session always write into the same place
         rs.STATE_DIR = self.state_dir
         self._events: queue.Queue = queue.Queue()
+        self.store = TaskStore(self.state_dir / "queue.json")
+        self.hosts = HostRegistry()
+        self.hosts.discover()
         self._sessions: dict[str, DownloadSession] = {}
         self._records: dict[str, DownloadRecord] = {}
         self._file_bytes: dict[tuple[str, int], int] = {}
@@ -140,36 +144,27 @@ class DownloadEngine(QObject):
     def record(self, job_id: str) -> DownloadRecord | None:
         return self._records.get(job_id)
 
-    def load_records(self) -> list[DownloadRecord]:
-        """Restore the downloads that were in the list when the app was closed."""
-        records = records_from_manifests(rs.list_jobs())
-        for record in records:
-            self._records[record.job_id] = record
-        return records
+    def load_tasks(self) -> list[DownloadRecord]:
+        """Restore the queue and merge the per file state of the manifests."""
+        tasks = self.store.load()
+        for task in tasks:
+            manifest = rs.load_job(task.job_id)
+            if manifest is not None:
+                task.files = list(manifest.files)
+                task.file_count = manifest.total_files
+                task.bytes_total = manifest.total_bytes
+                task.bytes_done = manifest.verified_bytes
+                task.verified = manifest.verified_files
+                task.root = manifest.root or task.root
+                if task.state.unfinished and manifest.status in (rs.JOB_COMPLETE,):
+                    task.state = TaskState.COMPLETED
+            self._records[task.job_id] = task
+        return list(self._records.values())
 
-    def persist_meta(self, record: DownloadRecord) -> None:
-        """Store the list entry itself (title, priority, tags) next to the manifest."""
-        path = self.state_dir / f"{record.job_id}.meta"
-        try:
-            self.state_dir.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(record.to_dict(), indent=2), encoding="utf-8")
-        except OSError:
-            pass
+    def persist(self, record: DownloadRecord) -> None:
+        """Write the task into the queue."""
+        self.store.update(record)
 
-    def load_meta(self) -> dict[str, dict]:
-        meta: dict[str, dict] = {}
-        try:
-            for path in self.state_dir.glob("*.meta"):
-                try:
-                    meta[path.name[:-len(".meta")]] = json.loads(
-                        path.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-        except OSError:
-            pass
-        return meta
-
-    # -- queue ----------------------------------------------------------------
     def add_download(self, url: str, destination: str | None = None,
                      options: EngineOptions | None = None,
                      record: DownloadRecord | None = None, name: str = "") -> DownloadRecord:
@@ -188,7 +183,7 @@ class DownloadEngine(QObject):
         if name:
             record.options["name"] = name
         self._records[job_id] = record
-        self.persist_meta(record)
+        self.store.add(record)
         self.job_added.emit(job_id)
         self._start(record, options)
         return record
@@ -213,6 +208,7 @@ class DownloadEngine(QObject):
             "name": str(record.options.get("name") or ""),
             "mode": mode,
             "options": {**options.to_spec(), "cookies_used": bool(options.cookies)},
+            "resolver": self.hosts.plan_for,
         }
         session = DownloadSession(spec, self._events)
         self._sessions[record.job_id] = session
@@ -467,7 +463,7 @@ class DownloadEngine(QObject):
             return False
         record.root = str(target)
         record.title = new_name
-        self.persist_meta(record)
+        self.persist(record)
         job = rs.load_job(record.job_id)
         if job is not None:
             job.root = str(target)
@@ -492,7 +488,7 @@ class DownloadEngine(QObject):
             return False
         record.root = str(target)
         record.destination = str(target_root)
-        self.persist_meta(record)
+        self.persist(record)
         job = rs.load_job(record.job_id)
         if job is not None:
             job.root = str(target)
@@ -511,7 +507,7 @@ class DownloadEngine(QObject):
         except Exception:  # noqa: BLE001 - the mirror must be a MediaFire link
             return False
         record.mirrors.append(url)
-        self.persist_meta(record)
+        self.persist(record)
         job = rs.load_job(record.job_id)
         if job is not None:
             job.mirrors = list(record.mirrors)
@@ -521,17 +517,17 @@ class DownloadEngine(QObject):
 
     def set_priority(self, record: DownloadRecord, priority: str) -> None:
         record.priority = priority
-        self.persist_meta(record)
+        self.persist(record)
         self.job_changed.emit(record.job_id)
 
     def set_tags(self, record: DownloadRecord, tags: list[str]) -> None:
         record.tags = [tag.strip() for tag in tags if tag.strip()]
-        self.persist_meta(record)
+        self.persist(record)
         self.job_changed.emit(record.job_id)
 
     def schedule(self, record: DownloadRecord, when: float) -> None:
         record.start_after = when
-        self.persist_meta(record)
+        self.persist(record)
         self.job_changed.emit(record.job_id)
 
     def check_for_update(self, record: DownloadRecord) -> str:

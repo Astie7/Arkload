@@ -47,6 +47,30 @@ them are public.
   Only `MyJDownloaderClient` is in the mirror. **`JDClosed` is not obtainable.**
 * On this machine: **Temurin JDK 25** is installed, **Ant, Maven and Gradle are not**.
 
+### 2.2.1 The baseline build (attempted, with the real tool chain)
+
+Apache Ant 1.10.15 and Temurin JDK 25 were installed and the upstream build was run
+unmodified.  The dependency layout the build expects was reconstructed (the build resolves
+`../utils`, `../browser` and `../MyJDownloaderClient` relative to `svn_trunk/build/`, and the
+mirror ships `svn_utils`, `svn_browser` and `svn_MyJDownloaderClient`):
+
+```
+ant -f build/newBuild/build_standalone.xml
+```
+
+Result: **the build fails inside the first compile step**, with 100 javac errors:
+
+* `package org.objectweb.asm does not exist` - the mirror's `utils/libs` contains only the
+  layout jars (`miglayout`, `jsvg`, `svgSalamander`); the libraries the sources compile against
+  are not in the archive,
+* `Response.java: cannot find symbol` - the snapshot does not even agree with itself,
+* `JNAWindowsProcessHandler is not abstract and does not override abstract method
+  isProcessesAlive(ProcessInfo...)` - the interface and the implementation in the same snapshot
+  are from different revisions.
+
+The trunk's own 5,256 files are never reached, and the engine core (`JDClosed`) is not in the
+archive at all.
+
 **Consequence: the supplied source cannot be built into a running JDownloader.** The "use
 JDownloader as the engine" option is *not executable* with this input - independently of the
 licence question below.
@@ -221,20 +245,42 @@ the model, the engine, the window and the dialogs.
 | Upstream MediaFire plugin | JDownloader mirror | **use as the parity specification, not as code** (GPLv3) |
 | Queue / scheduling / chunking / link collection / extraction | JDownloader closed core | **not available** - written by us where it matters |
 
-## 6. Proposed architecture
+## 6. The integration decision
 
-One engine, one queue, one source of truth - built on the code that exists and is proven, with a
-host boundary that leaves room for more sources later.
+The three approaches of the brief were evaluated against the audit:
+
+| Approach | Verdict |
+|---|---|
+| **A - extend the Java implementation** | **Not executable.** The engine core is closed and the public snapshot does not compile (see 2.2.1). It would also make ArkLoad a GPLv3 work. |
+| **B - Python as an internal helper** | **Its premise fails**: the Java side that would own the queue cannot be built or run. A helper without an engine to talk to is just the existing application. |
+| **C - a separate frontend** | Only meaningful with a working engine interface. The existing PySide6 window already is that frontend, and it works. |
+
+**Decision: keep one engine, one queue - the proven Python one - and take JDownloader's
+*architecture* rather than its code.**
+
+What is taken from JDownloader is the part that is genuinely good and can be reimplemented
+without copyleft: the **host plugin contract**.  A host plugin recognises the links of one
+service and resolves them into download links (the file name, the size, the checksum the
+service publishes); the queue downloads whatever the plugin produced.  That is exactly what
+`tools/arkload/hosts.py` does, with the MediaFire host as the first implementation and the
+add-on folder as the discovery mechanism.
+
+What is **not** taken: the Java engine, the Swing interface and the GPLv3 sources.  The
+upstream MediaFire plugin is read as the specification (see `docs/MEDIAFIRE-PARITY.md`), not
+copied.
+
+The result is one queue, one state machine and one persistence layer - the property the brief
+asks for - with the host plugin ecosystem as the extension point.
 
 ```
 +---------------------------------------------------------------+
 |  ArkLoad.exe  (PySide6)                                        |
-|  window / table model / preferences / dialogs / packaging      |
+|  window / sidebar / table / details card / preferences        |
 +-----------------------------+---------------------------------+
 |  ArkLoad core (Python)                                        |
-|  queue:  task states, persistence, scheduling, limits, retries  |
-|  hosts:  mediafire (done) | generic http (planned) | <plugin>  |
-|  plugins: addon.json + hooks (host resolvers, post processors) |
+|  queue:  TaskState, Task, TaskStore (queue.json)               |
+|  hosts:  mediafire | <add-on host>  ->  DownloadLink            |
+|  plugins: addon.json + setup(api) + create_host_plugin()       |
 +-----------------------------+---------------------------------+
 |  transport:  http (ranges, chunks, hashing, throttle)          |
 |  storage:    manifests + verified baselines                    |
