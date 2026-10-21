@@ -1,0 +1,5 @@
+# the application
+PySide6>=6.6
+
+# the build
+pyinstaller>=6.0

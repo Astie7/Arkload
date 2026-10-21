@@ -1,0 +1,13 @@
+# the Windows build
+build/
+dist/
+release/
+packaging/assets/mfd.ico
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
