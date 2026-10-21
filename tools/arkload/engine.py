@@ -1,18 +1,21 @@
 """The client for the official JDownloader 2 engine.
 
 The engine is the Java application built from the official JDownloader sources
-(``svn://svn.jdownloader.org/jdownloader/trunk`` and its three sibling repositories).  It owns
-the download queue, the host plugins and the transfers; ArkLoad talks to it through the local
-HTTP API of the engine (the "deprecated API", port 3128, enabled in the engine's settings).
+(``svn://svn.jdownloader.org/jdownloader/trunk`` and its three sibling repositories).  It owns the
+transfers and the host plugins; ArkLoad talks to it through the local HTTP API of the engine (the
+"deprecated API", port 3128, enabled in the engine's settings).
 
 Only the calls that were verified against a running engine live here:
 
-* ``queryPackages`` / ``queryLinks`` - what the queue holds
-* ``addLinksAndStartDownload`` - hand a link to the engine
+* ``queryPackages`` / ``linkcollector/queryPackages`` - what the queue holds
+* ``linkcollector/queryLinks`` - the links that are not started yet, with their sizes
+* ``linkcollector/addLinks`` - hand a link to the engine (with the folder it belongs into)
+* ``linkcollector/startDownloads`` - start the collected links
 * ``pause`` / ``enableLinks`` / ``disableLinks`` / ``removeLinks`` - control a task
 
 The protocol is a plain HTTP GET per call: a JSON object goes into the ``queryParams``
-parameter, the other methods take named parameters.
+parameter, the other methods take named parameters.  The task ids go over the wire as one JSON
+array (``linkIds=[1,2]``).
 """
 from __future__ import annotations
 
@@ -66,6 +69,11 @@ class JDownloaderEngine:
             return payload["data"]
         return payload
 
+    @staticmethod
+    def _ids(link_ids: Iterable[int]) -> str:
+        """The engine wants the ids as one json array: ``linkIds=[1,2]``."""
+        return json.dumps([int(i) for i in link_ids], separators=(",", ":"))
+
     # -- the queue ------------------------------------------------------------
     def available(self) -> bool:
         """True when the engine answers."""
@@ -76,13 +84,18 @@ class JDownloaderEngine:
             return False
 
     def packages(self) -> list[dict]:
-        """The packages (a package is one download: a folder, a file, a link list)."""
-        data = self.call("downloads", "queryPackages", {})
+        """The packages of the download list (one package is one download)."""
+        data = self.call("downloads", "queryPackages", {"size": True, "childCount": True})
+        return data if isinstance(data, list) else []
+
+    def collector_packages(self) -> list[dict]:
+        """The packages of the link collector (the links that were handed over)."""
+        data = self.call("linkcollector", "queryPackages", {"size": True, "childCount": True})
         return data if isinstance(data, list) else []
 
     def links(self) -> list[dict]:
-        """The links of the link collector (the links that were handed to the engine)."""
-        data = self.call("linkcollector", "queryLinks", {})
+        """The links of the link collector (the links that were not started yet)."""
+        data = self.call("linkcollector", "queryLinks", {"size": True})
         return data if isinstance(data, list) else []
 
     def download_links(self) -> list[dict]:
@@ -107,12 +120,23 @@ class JDownloaderEngine:
                            extractPassword="", downloadPassword="")
         return bool(result)
 
-    @staticmethod
-    def _ids(link_ids: Iterable[int]) -> str:
-        """The engine wants the ids as one json array: ``linkIds=[1,2]``."""
-        return json.dumps([int(i) for i in link_ids], separators=(",", ":"))
+    def collect(self, url: str, package_name: str = "", destination: str = "") -> bool:
+        """Hand a link to the link collector, together with the folder it belongs into.
 
-    def pause(self, link_ids: Iterable[int]) -> bool:
+        The link is not started yet: ArkLoad reads the files and their sizes from the collector
+        and starts the transfer afterwards, so it knows the ids it needs to control the task.
+        """
+        named = {"links": url, "packageName": package_name,
+                 "extractPassword": "", "downloadPassword": ""}
+        if destination:
+            named["destinationFolder"] = destination
+        return bool(self.call("linkcollector", "addLinks", **named))
+
+    def start(self, link_ids: Iterable[int]) -> bool:
+        """Start the collected links."""
+        return bool(self.call("linkcollector", "startDownloads", linkIds=self._ids(link_ids)))
+
+    def pause(self, link_ids: Iterable[int] | None = None) -> bool:
         """Pause the running downloads (the engine pauses all of them)."""
         return bool(self.call("downloads", "pause", value="true"))
 

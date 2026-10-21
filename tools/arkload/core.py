@@ -83,6 +83,11 @@ class Task:
 
     This is the only object that describes a download. The window renders it, the engine updates
     it and the queue stores it.
+
+    ``backend`` says which engine runs the task: ``"arkload"`` is ArkLoad's own MediaFire engine
+    (it verifies every file against MediaFire's SHA-256), ``"jdownloader"`` is the JDownloader 2
+    engine, which knows thousands of hosts.  ``external_id`` is the id the task has in that
+    engine, so a task survives a restart of ArkLoad.
     """
 
     job_id: str
@@ -112,6 +117,8 @@ class Task:
     note: str = ""
     errors: list = field(default_factory=list)
     files: list = field(default_factory=list)   # the per file records of the manifest
+    backend: str = "arkload"
+    external_id: str = ""
 
     # -- the texts the window shows ------------------------------------------
     @property
@@ -293,6 +300,8 @@ class Task:
             "verifying": self.verifying,
             "note": self.note,
             "errors": [list(item) for item in self.errors],
+            "backend": self.backend,
+            "external_id": self.external_id,
         }
 
     @classmethod
@@ -324,6 +333,8 @@ class Task:
             verifying=bool(data.get("verifying", False)),
             note=str(data.get("note") or ""),
             errors=[tuple(item) for item in (data.get("errors") or [])],
+            backend=str(data.get("backend") or "arkload"),
+            external_id=str(data.get("external_id") or ""),
         )
 
 

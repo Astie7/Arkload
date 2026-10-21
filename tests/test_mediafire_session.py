@@ -43,7 +43,8 @@ def fake_plan():
     return dl.Plan("folder", "mods", files, 0)
 
 
-def run_session(tmp_path, monkeypatch, dest, downloader, options=None, mode="download"):
+def run_session(tmp_path, monkeypatch, dest, downloader, options=None, mode="download",
+                resolver=None):
     """Run a session against the faked network and return (events, manifest)."""
     monkeypatch.setattr(dl, "make_plan", lambda source, name=None, token=None, cookie=None:
                         fake_plan())
@@ -54,6 +55,8 @@ def run_session(tmp_path, monkeypatch, dest, downloader, options=None, mode="dow
         "recovery_rounds": 2, "patterns": [], "cookies": None, "timeout": 5.0,
         "mode": mode, "options": options or {},
     }
+    if resolver is not None:
+        spec["resolver"] = resolver
     events = queue.Queue()
     session = gui.DownloadSession(spec, events)
     session.start()
@@ -71,6 +74,32 @@ def run_session(tmp_path, monkeypatch, dest, downloader, options=None, mode="dow
 
 def kind_of(events, name):
     return [event for event in events if event[1] == name]
+
+
+def test_the_session_works_with_a_host_plugin_resolver(tmp_path, monkeypatch):
+    """The application always hands a resolver to the session (the host plugin layer).
+
+    The session still needs the source of the link for the manifest - it used to fail with
+    "cannot access local variable 'source'" in that case.
+    """
+    dest = tmp_path / "downloads"
+    downloaded = []
+
+    def downloader(item, root, **kwargs):
+        data = PAYLOAD[item.rel.name]
+        path = root.joinpath(*item.rel.parts)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        downloaded.append(item.rel.name)
+        return dl.Result("ok", len(data), 0.0, sha256=digest(data), verified=True)
+
+    events, manifest = run_session(tmp_path, monkeypatch, dest, downloader,
+                                   resolver=lambda url: fake_plan())
+
+    assert sorted(downloaded) == ["a.jar", "b.jar", "c.jar"]
+    assert manifest is not None
+    assert manifest.status == rs.JOB_COMPLETE
+    assert not kind_of(events, "fatal")
 
 
 def test_session_downloads_only_what_is_missing(tmp_path, monkeypatch):

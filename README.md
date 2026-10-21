@@ -1,7 +1,7 @@
 # ArkLoad
 
-**Modern Download Manager** - a desktop download manager for **MediaFire** folders and files,
-with a dark interface in the style of the new Free Download Manager.
+**Modern Download Manager** - a desktop download manager for **MediaFire** folders and files and
+for every other host, with a dark interface in the style of the new Free Download Manager.
 
 ArkLoad is a normal Windows application: it installs with a setup program, keeps its data in your
 user profile and needs no Python of its own.
@@ -22,6 +22,18 @@ user profile and needs no Python of its own.
 * **A real speed limiter** - the snail button in the status bar caps the transfer rate.
 * **MediaFire folder keys** - a bare key such as `dpqhf3ughd4j5` works as well as a link.
 * **Keeps its list** - the downloads, their tags and their priority survive a restart.
+* **Knows thousands of hosts** - every link that is not a MediaFire link is downloaded by the
+  **JDownloader 2 engine**, which runs hidden in the background.  You never see a JDownloader
+  window: ArkLoad is the program you work with.  The MediaFire downloads keep running on
+  ArkLoad's own engine, with the SHA-256 verification.
+
+### The JDownloader engine
+
+The engine is a separate program (it is licensed under GPLv3+/AGPL), so ArkLoad does not install
+it for you.  Build it with `packaging/jdownloader/build_engine.ps1` (it checks out the official
+sources and builds them) and point ArkLoad at it under **Preferences → Download Engine**.  From
+then on ArkLoad starts it in the background when it is needed, drives it through its local API
+and stops it again when ArkLoad closes.
 
 ## The interface
 
@@ -99,7 +111,10 @@ Nothing is ever written into the installation folder.
 tools/arkload/            the PySide6 application
   arkload_window.py       the main window
   download_model.py   the records, the states and the table model
-  download_engine.py  the bridge to the downloader
+  download_engine.py  the queue and the two engines behind it
+  jdownloader.py     the JDownloader engine: the process and the backend
+  engine.py          the client for the local API of the JDownloader engine
+  hosts.py           the host plugins (MediaFire and the add-ons)
   preferences_view.py the preferences
   dialogs.py          the windows
   styles.py           the palette and the stylesheet
@@ -109,6 +124,7 @@ tools/mediafire_resume.py the manifests, the status detection, the verification
 tools/mediafire_session.py the worker that plans, verifies and downloads a job
 tools/mediafire_gui.py    the classic Tkinter window
 packaging/             the PyInstaller and Inno Setup configuration
+packaging/jdownloader/ the build of the JDownloader engine
 tests/                 the test suite
 ```
 
@@ -117,6 +133,13 @@ tests/                 the test suite
 ```bash
 pip install pytest PySide6
 pytest -q tests
+```
+
+The tests that talk to the real JDownloader engine are skipped when it is not installed; point
+them at your build with `ARKLOAD_JDOWNLOADER`:
+
+```bash
+ARKLOAD_JDOWNLOADER=D:\\path\\to\\JDownloader.jar pytest -q tests/test_arkload_engine_live.py
 ```
 
 ## License

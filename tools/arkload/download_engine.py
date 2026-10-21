@@ -1,12 +1,21 @@
-"""The download engine: it drives the real MediaFire downloader and reports to the UI.
+"""The download engine: it runs the downloads and reports to the UI.
 
-The heavy lifting happens in :mod:`tools.mediafire_session` (a plain thread, no GUI framework).
-This module owns the queue, turns the session events into Qt signals and keeps the persisted
-manifest in sync, so the window only ever deals with signals and slots.
+ArkLoad has two engines behind one queue:
+
+* **ArkLoad's own engine** (the MediaFire session in :mod:`tools.mediafire_session`) runs the
+  links of the hosts ArkLoad knows.  It verifies every file against the SHA-256 MediaFire
+  publishes, keeps a manifest per download and resumes interrupted transfers.
+* **the JDownloader 2 engine** runs everything else.  It runs headless behind the window and is
+  reached through its local API, so the user never sees a JDownloader window.
+
+The queue (:class:`~tools.arkload.core.TaskStore`) is the one list of downloads; every task
+remembers which engine runs it.
 """
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import json
 import os
 import queue
 import shutil
@@ -32,7 +41,9 @@ except ImportError:  # direct script run
 
 from . import settings as settings_store
 from .core import TaskState, TaskStore
+from .engine import EngineError, JDownloaderEngine
 from .hosts import HostRegistry
+from .jdownloader import EngineProcess, JDownloaderBackend, find_engine
 from .download_model import COMPLETE, DownloadRecord, INCOMPLETE, RUNNING
 
 REPO_URL = "https://github.com/Astie7/Arkload"
@@ -76,6 +87,8 @@ class EngineOptions:
     connections: int = 1           # parts of a file that are fetched at the same time
     verify_hashes: bool = True
     auto_resume: bool = True
+    engine_path: str = ""          # the JDownloader engine (the jar or its folder)
+    engine_port: int = 3128        # the local API of the JDownloader engine
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -126,10 +139,73 @@ class DownloadEngine(QObject):
         self._file_bytes: dict[tuple[str, int], int] = {}
         self._rates: dict[str, Rate] = {}
         self._active = 0
+        self._jd: JDownloaderBackend | None = None
+        self._jd_process: EngineProcess | None = None
+        self._jd_poll = 0.0
         self._poller = QTimer(self)
         self._poller.setInterval(120)
         self._poller.timeout.connect(self._tick)
         self._poller.start()
+
+    # -- the engines ----------------------------------------------------------
+    def jd_backend(self) -> JDownloaderBackend | None:
+        """The JDownloader backend, when the engine is installed.
+
+        The engine is a separate program, so it is only used when the user installed it and
+        pointed ArkLoad at it.
+        """
+        if self._jd is not None:
+            return self._jd
+        jar = find_engine(self.options.engine_path or None)
+        if jar is None:
+            return None
+        port = int(self.options.engine_port or 3128)
+        self._jd_process = EngineProcess(jar, port=port)
+        self._jd = JDownloaderBackend(JDownloaderEngine("127.0.0.1", port), self._jd_process)
+        return self._jd
+
+    def engine_of(self, url: str) -> str:
+        """Which engine runs a link.
+
+        The hosts ArkLoad knows (MediaFire and the add-ons) run on ArkLoad's own engine, because
+        it verifies every file against the hash the service publishes.  Everything else goes to
+        the JDownloader engine, which knows thousands of hosts.
+        """
+        if self.hosts.plugin_for(url) is not None:
+            return "arkload"
+        return "jdownloader"
+
+    def engine_available(self, name: str) -> bool:
+        """True when the engine of a task can run it."""
+        if name == "arkload":
+            return True
+        backend = self.jd_backend()
+        return backend is not None and (backend.available() or backend.process is not None)
+
+    def reset_jdownloader(self) -> None:
+        """Forget the JDownloader backend (the engine was moved or removed)."""
+        if self._jd_process is not None and self._jd_process.running:
+            self._jd_process.stop()
+        self._jd = None
+        self._jd_process = None
+
+    @staticmethod
+    def _title_for(url: str) -> str:
+        """The name a link gets in the list."""
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        name = (parsed.path or "").rstrip("/").rsplit("/", 1)[-1]
+        return name or parsed.netloc or url
+
+    @staticmethod
+    def _job_identity(url: str, destination: str) -> str:
+        """A stable id for "this link into this destination"."""
+        try:
+            dest = os.path.normcase(str(Path(destination).expanduser().resolve()))
+        except OSError:
+            dest = str(destination)
+        raw = "\n".join(["jdownloader", url, dest])
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
     # -- persistence ----------------------------------------------------------
     def state_path(self) -> Path:
@@ -158,6 +234,18 @@ class DownloadEngine(QObject):
                 task.root = manifest.root or task.root
                 if task.state.unfinished and manifest.status in (rs.JOB_COMPLETE,):
                     task.state = TaskState.COMPLETED
+            elif task.backend == "jdownloader":
+                # the JDownloader engine runs this one; take it back
+                backend = self.jd_backend()
+                if backend is not None:
+                    backend.restore(task)
+                    if task.external_id:
+                        try:
+                            data = json.loads(task.external_id)
+                        except ValueError:
+                            data = {}
+                        if isinstance(data, dict):
+                            task.package_uuid = data.get("package_uuid")
             self._records[task.job_id] = task
         return list(self._records.values())
 
@@ -171,22 +259,58 @@ class DownloadEngine(QObject):
         """Queue a new download; the row appears immediately, the work starts right away."""
         options = options or self.options
         destination = str(destination or options.destination)
-        source = dl.parse_source(url)
-        job_id = rs.job_identity(source.kind, source.key, destination, options.subfolder)
+        backend = self.engine_of(url)
+        if backend == "arkload":
+            source = dl.parse_source(url)
+            job_id = rs.job_identity(source.kind, source.key, destination, options.subfolder)
+            title = source.key
+            source_kind, source_key = source.kind, source.key
+        else:
+            source = None
+            job_id = self._job_identity(url, destination)
+            title = name or self._title_for(url)
+            source_kind, source_key = "file", ""
         if record is None:
-            record = DownloadRecord(job_id=job_id, url=url, title=source.key,
-                                    destination=destination, source_kind=source.kind,
-                                    source_key=source.key)
+            record = DownloadRecord(job_id=job_id, url=url, title=title,
+                                    destination=destination, source_kind=source_kind,
+                                    source_key=source_key)
         record.job_id = job_id
+        record.title = title
         record.destination = destination
+        record.backend = backend
         record.options = options.to_spec()
         if name:
             record.options["name"] = name
         self._records[job_id] = record
         self.store.add(record)
         self.job_added.emit(job_id)
-        self._start(record, options)
+        if backend == "arkload":
+            self._start(record, options)
+        else:
+            self._start_jdownloader(record, options)
         return record
+
+    def _start_jdownloader(self, record: DownloadRecord, options: EngineOptions) -> None:
+        """Give the link to the JDownloader engine."""
+        backend = self.jd_backend()
+        if backend is None:
+            record.state = TaskState.FAILED
+            record.note = ("The JDownloader engine is not installed - set its location in the "
+                           "preferences to download links of other hosts.")
+            self.job_changed.emit(record.job_id)
+            self.job_error.emit(record.job_id, record.note)
+            return
+        try:
+            backend.add(record, options)
+        except EngineError as e:
+            record.state = TaskState.FAILED
+            record.note = str(e)
+            self.job_changed.emit(record.job_id)
+            self.job_error.emit(record.job_id, str(e))
+            return
+        record.state = TaskState.RUNNING
+        record.external_id = backend.external_id(backend.tasks[record.job_id])
+        self.job_changed.emit(record.job_id)
 
     def _start(self, record: DownloadRecord, options: EngineOptions,
                mode: str = "download") -> None:
@@ -218,6 +342,9 @@ class DownloadEngine(QObject):
         self.busy_changed.emit(True)
 
     def start_record(self, record: DownloadRecord, mode: str = "download") -> None:
+        if record.backend == "jdownloader":
+            self.resume(record)
+            return
         if self._session(record) is not None:
             return          # it is already running
         options = self.options
@@ -238,6 +365,16 @@ class DownloadEngine(QObject):
 
     def pause(self, record: DownloadRecord) -> bool:
         """Pause a download. The bytes that are already there are kept."""
+        if record.backend == "jdownloader":
+            backend = self.jd_backend()
+            if backend is None:
+                return False
+            ok = backend.pause(record)
+            if ok:
+                record.state = TaskState.PAUSED
+                self.persist(record)
+                self.job_changed.emit(record.job_id)
+            return ok
         session = self._session(record)
         if session is not None:
             session.set_paused(True)
@@ -251,6 +388,15 @@ class DownloadEngine(QObject):
 
     def resume(self, record: DownloadRecord) -> None:
         """Continue a paused download; a stopped one starts again from the manifest."""
+        if record.backend == "jdownloader":
+            backend = self.jd_backend()
+            if backend is None:
+                return
+            if backend.resume(record):
+                record.state = TaskState.RUNNING
+                self.persist(record)
+                self.job_changed.emit(record.job_id)
+            return
         session = self._session(record)
         if session is not None:
             session.set_paused(False)
@@ -265,6 +411,15 @@ class DownloadEngine(QObject):
 
     def cancel(self, record: DownloadRecord) -> bool:
         """Stop a download. The finished files and the .part files are kept."""
+        if record.backend == "jdownloader":
+            backend = self.jd_backend()
+            if backend is None:
+                return False
+            ok = backend.cancel(record)
+            record.state = TaskState.CANCELLED
+            self.persist(record)
+            self.job_changed.emit(record.job_id)
+            return ok
         session = self._session(record)
         if session is not None:
             session.request_stop("cancelled")
@@ -282,11 +437,59 @@ class DownloadEngine(QObject):
             if session.is_alive():
                 session.request_stop(reason)
 
+    def shutdown(self) -> None:
+        """Stop the engine ArkLoad started, when the application closes."""
+        self.stop_all("interrupted")
+        if self._jd_process is not None and self._jd_process.running:
+            self._jd_process.stop()
+
     # -- events ---------------------------------------------------------------
     def _tick(self) -> None:
         """Move the session events onto the GUI thread and refresh the live counters."""
         self._drain()
+        self._poll_jdownloader()
         self._emit_stats()
+
+    def _poll_jdownloader(self) -> None:
+        """Read the state of the downloads the JDownloader engine runs (once a second)."""
+        if self._jd is None:
+            return
+        now = time.monotonic()
+        if now - self._jd_poll < 1.0:
+            return
+        self._jd_poll = now
+        try:
+            updates = self._jd.poll()
+        except EngineError:
+            return
+        for job_id, update in updates.items():
+            record = self._records.get(job_id)
+            if record is None:
+                continue
+            task = self._jd.tasks.get(job_id)
+            if task is not None:
+                record.external_id = self._jd.external_id(task)
+            state = update.get("state")
+            if state == "failed":
+                record.state = TaskState.FAILED
+                record.note = update.get("note") or ""
+            elif state == "complete":
+                record.state = TaskState.COMPLETED
+                record.finished = time.time()
+            elif state == "queued":
+                if record.state not in (TaskState.PAUSED, TaskState.CANCELLED):
+                    record.state = TaskState.QUEUED
+            else:
+                if record.state not in (TaskState.PAUSED, TaskState.CANCELLED,
+                                        TaskState.COMPLETED, TaskState.FAILED):
+                    record.state = TaskState.RUNNING
+            record.bytes_done = int(update.get("bytes_done") or 0)
+            record.bytes_total = int(update.get("bytes_total") or 0)
+            files = update.get("files") or []
+            if files:
+                record.files = files
+                record.file_count = len(files)
+            self.job_changed.emit(job_id)
 
     def _drain(self) -> None:
         """Move the session events onto the GUI thread."""
@@ -431,6 +634,10 @@ class DownloadEngine(QObject):
     # -- file operations ------------------------------------------------------
     def remove_from_list(self, record: DownloadRecord, delete_files: bool = False) -> None:
         """Remove a row from the list; the files are only deleted when asked for."""
+        if record.backend == "jdownloader":
+            backend = self.jd_backend()
+            if backend is not None:
+                backend.remove(record)
         session = self._sessions.get(record.job_id)
         if session is not None and session.is_alive():
             session.request_stop("cancelled")

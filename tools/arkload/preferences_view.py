@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, Q
 
 from .download_engine import EngineOptions
 
-SECTIONS = ("General", "Browser Integration", "Network", "Traffic Limits", "BitTorrent",
-            "Advanced")
+SECTIONS = ("General", "Download Engine", "Browser Integration", "Network", "Traffic Limits",
+            "BitTorrent", "Advanced")
 
 
 class PreferencesView(QWidget):
@@ -90,6 +90,8 @@ class PreferencesView(QWidget):
 
         if name == "General":
             self._build_general(body_layout)
+        elif name == "Download Engine":
+            self._build_engine(body_layout)
         elif name == "Browser Integration":
             self._build_browser(body_layout)
         elif name == "Network":
@@ -103,6 +105,83 @@ class PreferencesView(QWidget):
         return page
 
     # -- pages ----------------------------------------------------------------
+    def _build_engine(self, layout: QVBoxLayout) -> None:
+        """The engine that downloads the links of the hosts ArkLoad does not know itself."""
+        from .jdownloader import find_engine
+
+        intro = QLabel(
+            "ArkLoad downloads the MediaFire links with its own engine, which verifies every "
+            "file against the SHA-256 MediaFire publishes.  Every other link is downloaded by "
+            "the JDownloader 2 engine: it runs hidden in the background, so no JDownloader "
+            "window is ever shown.")
+        intro.setWordWrap(True)
+        intro.setObjectName("Muted")
+        layout.addWidget(intro)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.engine_edit = QLineEdit(self.settings.get("engine_path", ""))
+        self.engine_edit.setPlaceholderText("The folder or the JDownloader.jar of the engine")
+        self.engine_edit.setMaximumWidth(520)
+        self.engine_edit.textChanged.connect(self._on_engine_settings)
+        form.addRow("JDownloader engine", self.engine_edit)
+
+        self.engine_port_spin = QSpinBox()
+        self.engine_port_spin.setRange(1024, 65535)
+        self.engine_port_spin.setMaximumWidth(140)
+        self.engine_port_spin.setValue(int(self.settings.get("engine_port", 3128) or 3128))
+        self.engine_port_spin.valueChanged.connect(self._on_engine_settings)
+        form.addRow("Local API port", self.engine_port_spin)
+        layout.addLayout(form)
+
+        row = QHBoxLayout()
+        browse = QPushButton("Choose the engine…")
+        browse.clicked.connect(self._choose_engine)
+        row.addWidget(browse)
+        test = QPushButton("Test the connection")
+        test.clicked.connect(self._test_engine)
+        row.addWidget(test)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        self.engine_label = QLabel("")
+        self.engine_label.setObjectName("Muted")
+        self.engine_label.setWordWrap(True)
+        layout.addWidget(self.engine_label)
+
+        found = find_engine(self.engine_edit.text().strip() or None)
+        if found:
+            self.engine_label.setText(f"The engine is there: {found}")
+        elif self.engine_edit.text().strip():
+            self.engine_label.setText("There is no JDownloader.jar at that place.")
+        else:
+            self.engine_label.setText(
+                "No engine was found.  Build it with packaging/jdownloader/build_engine.ps1 and "
+                "point ArkLoad at the folder that holds JDownloader.jar.")
+
+    def _choose_engine(self) -> None:
+        start = self.engine_edit.text().strip() or str(Path.home())
+        folder = QFileDialog.getExistingDirectory(self, "Choose the folder of the engine", start)
+        if folder:
+            self.engine_edit.setText(folder)
+            self._on_engine_settings()
+
+    def _test_engine(self) -> None:
+        """Ask the engine whether it answers."""
+        from .engine import EngineError, JDownloaderEngine
+
+        path = self.engine_edit.text().strip()
+        port = int(self.engine_port_spin.value())
+        if not path:
+            self.engine_label.setText("Choose the engine first.")
+            return
+        client = JDownloaderEngine("127.0.0.1", port, timeout=5)
+        try:
+            packages = client.packages()
+        except EngineError as e:
+            self.engine_label.setText(f"The engine does not answer: {e}")
+            return
+        self.engine_label.setText(f"The engine answers: {len(packages)} download(s) in its list.")
     def _build_general(self, layout: QVBoxLayout) -> None:
         form = QFormLayout()
         form.setSpacing(10)
@@ -363,6 +442,14 @@ class PreferencesView(QWidget):
         self.options.cookies = self.cookies_edit.text().strip()
         if self.fixed_folder_radio.isChecked() and self.folder_edit.text().strip():
             self.options.destination = self.folder_edit.text().strip()
+        self._emit()
+
+    def _on_engine_settings(self) -> None:
+        """The JDownloader engine changed: it belongs to the settings and to the options."""
+        self.options.engine_path = self.engine_edit.text().strip()
+        self.options.engine_port = int(self.engine_port_spin.value())
+        self.settings_changed.emit({"engine_path": self.options.engine_path,
+                                    "engine_port": self.options.engine_port})
         self._emit()
 
     def _emit(self) -> None:

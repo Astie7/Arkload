@@ -74,13 +74,15 @@ class DownloadSession(threading.Thread):
         started = time.monotonic()
         spec = self.spec
         try:
+            # the source is always needed (the key identifies the job in the manifest), also
+            # when the plan comes from a host plugin
+            source = dl.parse_source(spec["url"])
+            source_kind = source.kind
             resolver = spec.get("resolver")
             if resolver is not None:
                 plan = resolver(spec["url"])
                 source_kind = "folder" if getattr(plan, "kind", "folder") == "folder" else "file"
             else:
-                source = dl.parse_source(spec["url"])
-                source_kind = source.kind
                 plan = dl.make_plan(source, None, None, spec.get("cookies"))
             self.post("planning", source_kind)
 

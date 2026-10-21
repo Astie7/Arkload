@@ -55,7 +55,7 @@ def test_a_json_query_goes_into_query_params(engine):
     client, fake = engine
     client.packages()
     assert fake.calls[0].startswith("/downloads/queryPackages?queryParams=")
-    assert "%7B%7D" in fake.calls[0]          # the empty json object, url encoded
+    assert "%7B%22size%22%3Atrue" in fake.calls[0]   # the size is asked for as well
 
 
 def test_named_parameters_are_used_for_the_task_calls(engine):

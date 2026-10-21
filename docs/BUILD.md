@@ -134,3 +134,9 @@ local API in `cfg/org.jdownloader.api.RemoteAPIConfig.json`:
 ```
 
 `tools/arkload/engine.py` is the client for that API.
+
+ArkLoad starts the engine itself when it is needed: `tools/arkload/jdownloader.py` writes the API
+settings into the engine's `cfg` folder, starts it with `-Djava.awt.headless=true` (so no
+JDownloader window appears) and stops it again when ArkLoad closes.  The location of the engine is
+a setting - in the application under **Preferences → Download Engine**, or in the settings file
+as `engine_path`.

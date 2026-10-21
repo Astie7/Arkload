@@ -1,6 +1,6 @@
 # ArkLoad - Phase 1 audit and architecture report
 
-**Date:** 2026-10-21 · **Status:** Phase 1 complete; the official JDownloader sources were checked out, built and run (section 2.5)
+**Date:** 2026-10-21 · **Status:** the JDownloader 2 engine runs behind ArkLoad (section 2.5 and section 6)
 
 ## 1. Inputs that were inspected
 
@@ -262,7 +262,7 @@ the model, the engine, the window and the dialogs.
 
 | Limitation | Detail |
 |---|---|
-| No host plugin system | one host (MediaFire) is built in |
+| No host plugin system | one host (MediaFire) is built in; every other host goes to the JDownloader engine |
 | No link collection from a page | the browser extension only copies the current URL |
 | No archive extraction | the files are stored as they are |
 | No upload | the upload counter always reads 0 |
@@ -282,7 +282,7 @@ the model, the engine, the window and the dialogs.
 | Scheduling | yes | yes (start time) |
 | Queue, pause, resume, cancel, retry | yes (closed core) | yes, one queue, one state machine |
 | Persistence | yes (closed core) | yes, JSON manifests |
-| Multi host | 1,422 host plugins | one host + an add-on API |
+| Multi host | 1,422 host plugins | MediaFire with its own engine, every other host with the JDownloader engine (headless, behind the window) |
 | Link collection | yes (hosthunter) | no |
 | Archive extraction | yes | no |
 | Accounts / premium | yes | no (anonymous + cookies) |
@@ -313,15 +313,41 @@ The three approaches of the brief were evaluated against the audit:
 | **B - Python as an internal helper** | **The premise now holds**: the Java engine exists and exposes a local API that Python drives (section 2.5). A helper without an engine to talk to is just the existing application - that part was always true. |
 | **C - a separate frontend** | **The interface is now verified**: `tools/arkload/engine.py` drives the running engine over its local API. The PySide6 window can be pointed at the Java engine instead of the Python one. |
 
-**Decision (unchanged in the shipped product, now with a proven alternative): keep one engine,
-one queue - the proven Python one - and take JDownloader's *architecture* rather than its code.**
+**Decision (2026-10-21, revised): one queue, two engines behind it.**
 
-The Java engine is no longer an unreachable dream (section 2.5): it builds, it runs and it can be
-driven from Python. It is therefore a **documented, available alternative backend**, not the
-shipped default. The reasons to keep the Python engine as the default are unchanged and now have
-one more: the Python engine carries **the MediaFire functionality that ArkLoad adds on top of
-JDownloader** (SHA-256 verification against the source, the per file states, the manifests), and
-the Java engine would drag AGPL-3.0 into the distribution.
+ArkLoad is the program the user sees.  Behind it run two engines, and every download says which
+one runs it:
+
+* **ArkLoad's own engine** runs the links of the hosts ArkLoad knows - MediaFire and the add-ons.
+  It keeps everything that was built for MediaFire: the SHA-256 verification against the hash
+  MediaFire publishes, the per file states, the manifests, the recovery passes.  **The MediaFire
+  functionality is not replaced by the JDownloader plugin.**
+* **the JDownloader 2 engine** runs every other link.  It knows thousands of hosts, it starts
+  headless (`-Djava.awt.headless=true`), so **no JDownloader window is ever shown**, and ArkLoad
+  drives it through its local API (section 2.5).
+
+The queue (`queue.json`) is the one list of downloads.  A task remembers its engine
+(`Task.backend`) and the ids it has in that engine (`Task.external_id`), so the list survives a
+restart of ArkLoad.
+
+```
++---------------------------------------------------------------+
+|  ArkLoad.exe  (PySide6)                                        |
+|  window / sidebar / table / details card / preferences        |
++-----------------------------+---------------------------------+
+|  ArkLoad core (Python)                                        |
+|  queue:  TaskState, Task, TaskStore (queue.json)               |
+|  hosts:  mediafire | <add-on host>  ->  DownloadLink            |
++-----------------------------+---------------------------------+
+|  engines                                                         |
+|  "arkload"      -> the MediaFire session (SHA-256, manifests)   |
+|  "jdownloader"  -> the JDownloader 2 engine (headless, API)    |
++---------------------------------------------------------------+
+```
+
+The JDownloader engine is a separate program (GPLv3+/AGPL), so it is not part of the ArkLoad
+installation: the user points ArkLoad at it in the preferences ("Download Engine"), and ArkLoad
+starts it in the background when it is needed.
 
 What is taken from JDownloader is the part that is genuinely good and can be reimplemented
 without copyleft: the **host plugin contract**.  A host plugin recognises the links of one
@@ -347,8 +373,11 @@ asks for - with the host plugin ecosystem as the extension point.
 |  hosts:  mediafire | <add-on host>  ->  DownloadLink            |
 |  plugins: addon.json + setup(api) + create_host_plugin()       |
 +-----------------------------+---------------------------------+
-|  transport:  http (ranges, chunks, hashing, throttle)          |
-|  storage:    manifests + verified baselines                    |
+|  engines                                                         |
+|  "arkload"      -> the MediaFire session (SHA-256, manifests)   |
+|                     transport: http (ranges, chunks, hashing)    |
+|                     storage:   manifests + verified baselines   |
+|  "jdownloader"  -> the JDownloader 2 engine (headless, API)    |
 +---------------------------------------------------------------+
 ```
 
@@ -359,11 +388,12 @@ asks for - with the host plugin ecosystem as the extension point.
 * **Plugin API**: an add-on is a folder with `addon.json` and `setup(api)` (already implemented in
   `arkload/addons.py`); it can register a host resolver, a post processor or a menu action.
 * **The upstream plugin is the parity checklist** - see `docs/MEDIAFIRE-PARITY.md`.
-* **The Java route is open now, but licence heavy**: the official sources build and run
-  (section 2.5) and the localhost protocol between the ArkLoad UI and the Java engine exists and
-  is verified (`tools/arkload/engine.py`). It would make a distributed ArkLoad an **AGPL-3.0**
-  product (GPLv3+ for the plugins, AGPL-3.0 non-commercial for the AppWork libraries, a paid
-  AppWork licence for commercial use). The Python engine stays the default.
+* **The Java route is used, and it is licence heavy**: the official sources build and run
+  (section 2.5), the engine runs headless behind the window and the localhost protocol between
+  the ArkLoad UI and the engine is verified (`tools/arkload/engine.py`). A distributed ArkLoad that
+  ships the engine is an **AGPL-3.0** product (GPLv3+ for the plugins, AGPL-3.0 non-commercial
+  for the AppWork libraries, a paid AppWork licence for commercial use).  ArkLoad therefore does
+  not ship the engine: the user installs it separately and points ArkLoad at it.
 
 ## 7. Risks and licensing
 

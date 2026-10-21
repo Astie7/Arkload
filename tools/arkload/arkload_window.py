@@ -57,7 +57,14 @@ from .settings import default_destination, load_settings, save_settings
 APP_NAME = "ArkLoad"
 APP_SHORT_NAME = "ArkLoad"
 VERSION = "1.0"
-TORRENT_SUPPORTED = False          # this build downloads MediaFire links only
+TORRENT_SUPPORTED = False          # this build does not download torrents
+
+
+def engine_name(record) -> str:
+    """The engine that runs a download, the way the details card shows it."""
+    if getattr(record, "backend", "arkload") == "jdownloader":
+        return "JDownloader 2"
+    return "ArkLoad (MediaFire)"
 
 
 class DropZone(QWidget):
@@ -86,7 +93,7 @@ class DropZone(QWidget):
         centre = self.rect().center()
         icon_size = 18
         gap = 8
-        text = "Drag-and-drop a MediaFire link or folder key"
+        text = "Drag-and-drop a link or a folder key"
         font = QFont(self.font())
         font.setPixelSize(15)
         painter.setFont(font)
@@ -357,6 +364,10 @@ class DetailsPanel(QWidget):
         self.stats_row.setObjectName("Muted")
         info.addWidget(self.stats_row)
 
+        self.engine_row = QLabel("")
+        self.engine_row.setObjectName("Muted")
+        info.addWidget(self.engine_row)
+
         self.priority_link = QLabel("Priority: high")
         self.priority_link.setStyleSheet("color: #22C55E;")
         self.priority_link.setCursor(Qt.PointingHandCursor)
@@ -426,6 +437,7 @@ class DetailsPanel(QWidget):
             f"      Added at: {fmt_added(record.added)}"
             f"      Download speed: {fmt_speed(record.speed_down)}"
             f"      Upload speed: {fmt_speed(record.speed_up)}")
+        self.engine_row.setText("Engine: " + engine_name(record))
         self.priority_link.setText(f"Priority: {record.priority.lower()}")
         colour = {"HIGH": "#22C55E", "MEDIUM": "#E0A93A", "LOW": "#EF5F5F"}.get(
             record.priority, "#22C55E")
@@ -497,6 +509,7 @@ class ArkLoadMainWindow(QMainWindow):
         self._restore_downloads()
         self._update_status_bar()
         QTimer.singleShot(400, self._auto_resume)
+        QTimer.singleShot(1500, self._warm_up_engine)
 
     # ------------------------------------------------------------------ build
 
@@ -517,6 +530,8 @@ class ArkLoadMainWindow(QMainWindow):
             connections=int(settings.get("connections", 1) or 1),
             verify_hashes=bool(settings.get("verify_hashes", True)),
             auto_resume=bool(settings.get("auto_resume", True)),
+            engine_path=str(settings.get("engine_path", "") or ""),
+            engine_port=int(settings.get("engine_port", 3128) or 3128),
         )
 
     def _build(self) -> None:
@@ -708,6 +723,7 @@ class ArkLoadMainWindow(QMainWindow):
 
         self.drop_zone = DropZone()
         area_layout.addWidget(self.drop_zone, 1)
+        body.addWidget(area, 1)
         outer.addLayout(body, 1)
 
         self.details = DetailsPanel()
@@ -892,6 +908,20 @@ class ArkLoadMainWindow(QMainWindow):
                     continue
                 self.engine.start_record(record)
 
+    def _warm_up_engine(self) -> None:
+        """Start the JDownloader engine in the background when the queue needs it.
+
+        The engine is a JVM: it takes a few seconds to come up, and the window must not wait
+        for it.
+        """
+        backend = self.engine.jd_backend()
+        if backend is None:
+            return
+        needs_engine = any(record.backend == "jdownloader"
+                           for record in self.model.records())
+        if needs_engine:
+            backend.start_in_background()
+
     def _on_job_added(self, job_id: str) -> None:
         record = self.engine.record(job_id)
         if record is not None and self.model.record(job_id) is None:
@@ -905,6 +935,7 @@ class ArkLoadMainWindow(QMainWindow):
             self.engine.persist(record)
             self.addons.fire("status_change", record)
         self._update_details()
+        self._update_sidebar_counts()
 
     def _maybe_exit(self) -> None:
         """Close the application when it was started with --exit-when-done."""
@@ -1176,6 +1207,10 @@ class ArkLoadMainWindow(QMainWindow):
     def _build_row_menu(self, record: DownloadRecord) -> QMenu:
         """The context menu of one download, in the order of the reference."""
         menu = QMenu(self)
+        # the MediaFire downloads are verified against MediaFire's own hash, the downloads of
+        # the JDownloader engine are not - the actions that need it are only offered when it
+        # applies
+        mediafire = getattr(record, "backend", "arkload") == "arkload"
 
         # the download controls, the state decides what can be used
         running = record.status in (RUNNING, "downloading")
@@ -1222,6 +1257,9 @@ class ArkLoadMainWindow(QMainWindow):
         menu.addSeparator()
 
         mirror = menu.addAction("Add mirror")
+        mirror.setEnabled(mediafire)
+        if not mediafire:
+            mirror.setToolTip("A mirror is a second MediaFire link with the same files.")
         mirror.triggered.connect(lambda: self._add_mirror(record))
 
         page_action = menu.addAction("Open download page")
@@ -1231,6 +1269,9 @@ class ArkLoadMainWindow(QMainWindow):
         copy_action.triggered.connect(lambda: QApplication.clipboard().setText(record.url))
 
         update_action = menu.addAction("Check for update")
+        update_action.setEnabled(mediafire)
+        if not mediafire:
+            update_action.setToolTip("Only MediaFire downloads can be compared with their source.")
         update_action.triggered.connect(lambda: self._check_record_update(record))
 
         export_action = menu.addAction("Export selected downloads")
@@ -1281,7 +1322,8 @@ class ArkLoadMainWindow(QMainWindow):
 
     def _add_download(self) -> None:
         dialog = AddDownloadDialog(self, self.engine.options.destination,
-                                   history=self._destination_history())
+                                   history=self._destination_history(),
+                                   resolver=self.engine.engine_of)
         if dialog.exec() != AddDownloadDialog.Accepted:
             return
         result = dialog.accepted or {}
@@ -1843,6 +1885,11 @@ class ArkLoadMainWindow(QMainWindow):
     def _on_settings_changed(self, settings: dict) -> None:
         self.settings.update(settings)
         self._save_settings()
+        if "engine_path" in settings or "engine_port" in settings:
+            # the engine changed: the backend is built again the next time it is needed
+            self.engine.options.engine_path = str(settings.get("engine_path", "") or "")
+            self.engine.options.engine_port = int(settings.get("engine_port", 3128) or 3128)
+            self.engine.reset_jdownloader()
 
     def _on_preference_action(self, action: str, payload) -> None:
         """The preferences ask the window to do something it cannot do itself."""
@@ -1901,4 +1948,5 @@ class ArkLoadMainWindow(QMainWindow):
                 return
             self.engine.stop_all("interrupted")
         self._save_settings()
+        self.engine.shutdown()
         event.accept()

@@ -178,15 +178,15 @@ def test_window_builds_with_the_expected_widgets(window):
 def test_preferences_navigation(window):
     window._show_preferences()
     assert window.stack.currentIndex() == 1
-    assert window.preferences.sidebar.count() == 6
+    assert window.preferences.sidebar.count() == 7
     names = [window.preferences.sidebar.item(i).text()
              for i in range(window.preferences.sidebar.count())]
-    assert names == ["General", "Browser Integration", "Network", "Traffic Limits",
-                     "BitTorrent", "Advanced"]
+    assert names == ["General", "Download Engine", "Browser Integration", "Network",
+                     "Traffic Limits", "BitTorrent", "Advanced"]
     assert "Antivirus" not in names
     assert "Remote Access" not in names
-    window.preferences.sidebar.setCurrentRow(3)
-    assert window.preferences.stack.currentIndex() == 3
+    window.preferences.sidebar.setCurrentRow(4)
+    assert window.preferences.stack.currentIndex() == 4
     window._show_dashboard()
     assert window.stack.currentIndex() == 0
 
@@ -198,18 +198,47 @@ def test_theme_switch_changes_the_stylesheet(window, qt_app):
     assert "#141415" in qt_app.styleSheet()
 
 
+def test_the_download_table_is_part_of_the_window(window, qt_app):
+    """The table has to be in the layout, otherwise the list is never shown."""
+    from tools.arkload.download_model import DownloadRecord
+    window.show()
+    qt_app.processEvents()
+    record = DownloadRecord(job_id="x", url="https://example.com/a.zip", title="a.zip",
+                            destination="d")
+    window.model.add_record(record)
+    qt_app.processEvents()
+    assert window.table.isVisible()
+    assert window.model.rowCount() == 1
+    # the drop zone gives way to the list
+    assert window.table.parentWidget().isVisible()
+
+
 def test_add_download_dialog_validates_the_url(window, tmp_path, monkeypatch):
     from tools.arkload import dialogs
     monkeypatch.setattr(dialogs.QMessageBox, "warning", lambda *args, **kwargs: None)
     dialog = dialogs.AddDownloadDialog(window, str(tmp_path))
-    dialog.url_edit.setText("not a mediafire link")
+    dialog.url_edit.setText("not a link")
     dialog._accept()
     assert dialog.accepted is None               # rejected, the dialog stays open
     dialog.url_edit.setText("https://www.mediafire.com/folder/abc")
     dialog.destination_combo.setCurrentText(str(tmp_path))
     dialog._accept()
     assert dialog.accepted is not None
-    assert dialog.accepted["source"].kind == "folder"
+    assert dialog.accepted["url"] == "https://www.mediafire.com/folder/abc"
+
+
+def test_add_download_dialog_takes_any_link(window, tmp_path, monkeypatch):
+    """A link of another host is accepted as well - the JDownloader engine runs it."""
+    from tools.arkload import dialogs
+    monkeypatch.setattr(dialogs.QMessageBox, "warning", lambda *args, **kwargs: None)
+    dialog = dialogs.AddDownloadDialog(window, str(tmp_path),
+                                       resolver=lambda url: "jdownloader")
+    dialog.url_edit.setText("https://example.com/files/pack.zip")
+    dialog.destination_combo.setCurrentText(str(tmp_path))
+    dialog._accept()
+    assert dialog.accepted is not None
+    assert dialog.accepted["url"] == "https://example.com/files/pack.zip"
+    assert "JDownloader" in dialog.engine_label.text()
 
 
 def test_add_download_dialog_refuses_torrents(window, tmp_path, monkeypatch):

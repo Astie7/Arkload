@@ -28,7 +28,7 @@ class AddDownloadDialog(QDialog):
     """The 'New download' window: the link, where it goes, the name and the schedule."""
 
     def __init__(self, parent: QWidget | None = None, destination: str = "", url: str = "",
-                 history: list[str] | None = None):
+                 history: list[str] | None = None, resolver=None):
         super().__init__(parent)
         self.setWindowTitle("New download")
         self.setModal(True)
@@ -36,6 +36,8 @@ class AddDownloadDialog(QDialog):
         self.selected_file: str = ""
         self.accepted_url: str = ""
         self.accepted: dict | None = None
+        #: tells which engine runs a link (``url -> "ArkLoad" | "JDownloader"``)
+        self.resolver = resolver
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 16)
@@ -45,7 +47,7 @@ class AddDownloadDialog(QDialog):
         title.setObjectName("Heading")
         layout.addWidget(title)
 
-        label = QLabel("MediaFire link or folder key")
+        label = QLabel("Link")
         label.setObjectName("FieldLabel")
         label.setMaximumWidth(400)
         layout.addWidget(label)
@@ -61,10 +63,16 @@ class AddDownloadDialog(QDialog):
         url_row.addWidget(paste)
         layout.addLayout(url_row)
 
-        hint = QLabel("A folder link, a file link or a bare folder key such as dpqhf3ughd4j5.")
+        hint = QLabel("A MediaFire folder, a MediaFire file, a bare folder key such as "
+                      "dpqhf3ughd4j5 - or any other link, which the JDownloader engine "
+                      "downloads.")
         hint.setObjectName("Muted")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+
+        self.engine_label = QLabel("")
+        self.engine_label.setObjectName("Muted")
+        layout.addWidget(self.engine_label)
 
         label = QLabel("Save to")
         label.setObjectName("FieldLabel")
@@ -133,6 +141,24 @@ class AddDownloadDialog(QDialog):
     def _validate(self) -> None:
         text = self.url_edit.text().strip()
         self.ok_button.setEnabled(bool(text) and not is_torrent(text))
+        self._show_engine(text)
+
+    def _show_engine(self, text: str) -> None:
+        """Tell the user which engine will run the link."""
+        if not text or self.resolver is None:
+            self.engine_label.setText("")
+            return
+        try:
+            engine = self.resolver(text)
+        except Exception:  # noqa: BLE001 - the label is a hint, never a blocker
+            engine = ""
+        if engine == "arkload":
+            self.engine_label.setText("This link is downloaded by ArkLoad and verified "
+                                      "against MediaFire's SHA-256.")
+        elif engine == "jdownloader":
+            self.engine_label.setText("This link is downloaded by the JDownloader engine.")
+        else:
+            self.engine_label.setText("")
 
     def _paste(self) -> None:
         from PySide6.QtWidgets import QApplication
@@ -168,18 +194,21 @@ class AddDownloadDialog(QDialog):
         text = self.url_edit.text().strip()
         if not text:
             QMessageBox.warning(self, "New download",
-                                "Enter a MediaFire link or a folder key.")
+                                "Enter a link to download.")
             return
         if is_torrent(text):
             QMessageBox.warning(
                 self, "New download",
-                "ArkLoad downloads MediaFire links - a torrent file is not a MediaFire link.")
+                "ArkLoad does not download torrents.")
             return
-        try:
-            source = dl.parse_source(text)
-        except Exception as e:  # noqa: BLE001 - show the reason to the user
-            QMessageBox.warning(self, "New download", f"That link cannot be used:\n\n{e}")
-            return
+        if not (text.startswith("http://") or text.startswith("https://")):
+            # a bare MediaFire folder key is allowed, everything else has to be a link
+            try:
+                dl.parse_source(text)
+            except Exception as e:  # noqa: BLE001 - show the reason to the user
+                QMessageBox.warning(self, "New download",
+                                    f"That link cannot be used:\n\n{e}")
+                return
         destination = self.destination_combo.currentText().strip()
         if not destination:
             QMessageBox.warning(self, "New download", "Choose a folder for the download.")
@@ -193,7 +222,7 @@ class AddDownloadDialog(QDialog):
         self.accepted = {
             "url": text,
             "dest": str(Path(destination).expanduser()),
-            "source": source,
+            "source": None,
             "name": self.name_edit.text().strip(),
             "schedule": self._schedule_time(),
         }
