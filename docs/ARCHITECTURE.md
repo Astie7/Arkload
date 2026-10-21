@@ -1,6 +1,6 @@
 # ArkLoad - Phase 1 audit and architecture report
 
-**Date:** 2026-10-21 · **Status:** Phase 1 complete, Phase 2 ready to start
+**Date:** 2026-10-21 · **Status:** Phase 1 complete; the official JDownloader sources were checked out, built and run (section 2.5)
 
 ## 1. Inputs that were inspected
 
@@ -8,10 +8,16 @@
 |---|---|---|
 | The MediaFire downloader (this repository) | **Inspected, first hand** | 14 modules, ~4,500 lines, 147 passing tests, live downloads against `mediafire.com` |
 | JDownloader 2 source (`jdownloader_mirror-main.zip`, 575 MB) | **Inspected, first hand** | the official upstream **SVN mirror** (daily auto-updated), unpacked to `D:\AstieProjects\_audit_jdownloader` |
+| The **official** JDownloader 2 sources (SVN) | **Checked out, built, run** | four official repositories, see section 2.5 |
 
 The JDownloader mirror is **not a fork** - its README says it is "a daily auto-updated mirror of the
 JDownloader SVN server". Layout: `svn_trunk` (the main source), `svn_MyJDownloaderClient`,
 `svn_utils`, `svn_browser`.
+
+> **Superseded (section 2.5):** the mirror turned out to be a partial snapshot that does not
+> compile. The **official SVN repositories** are public and the engine builds from them. The
+> findings in sections 2.1 - 2.4 describe the *mirror*; section 2.5 describes the *official
+> sources* and is the current state of the Java route.
 
 ## 2. The JDownloader 2 audit
 
@@ -117,6 +123,57 @@ Consequences:
   licence text, the copyright notices and the corresponding source must be distributed with it.
 * The closed modules cannot be used at all.
 * Renaming the application does not remove these obligations.
+
+### 2.5 The official sources: available, buildable, runnable
+
+The upstream SVN server is public and complete. Four repositories were checked out with
+`svn.exe` (Cygwin 1.14.2) into `D:\AstieProjects\_jd_official`:
+
+| Repository | Path | Revision |
+|---|---|---|
+| `svn://svn.appwork.org/utils` | `AppWorkUtils` | **r4802** |
+| `svn://svn.jdownloader.org/jdownloader/browser` | `JDBrowser` | **r53703** |
+| `svn://svn.jdownloader.org/jdownloader/trunk` | `JDownloader` | **r53703** |
+| `svn://svn.jdownloader.org/jdownloader/MyJDownloaderClient` | `MyJDownloaderClient` | **r53703** |
+
+**Tool chain:** Apache Ant 1.10.15, Temurin JDK 25.0.4.101, `JAVA_HOME` set to the JDK.
+
+**The documented build** (`JDownloader/build/newBuild/build_standalone.xml`) compiles AppWorkUtils
+(1525 classes), MyJDownloaderClient (158), JDBrowser (54) and the trunk (4393) and produces
+`JDownloader/standalone/dist` with `Core.jar`, `JDownloader.jar`, 2,334 plugin classes (including
+`jd/plugins/hoster/MediafireCom.class` and `jd/plugins/decrypter/MediafireComFolder.class`),
+the themes, the translations and the extensions.
+
+The build needs **two changes in the checkout** (not in the upstream repository, both documented in
+`packaging/jdownloader/build_engine.ps1`):
+
+1. **AppWorkUtils' `ide` package.** The standalone build excludes `**,/ide/**` from the utils
+   compile and expects the package in a prebuilt jar that the repository no longer ships. The
+   trunk's captcha test helper imports `org.appwork.utils.ide.IDEUtils`, so the package is
+   compiled from the sources instead (the exclusion is removed).
+2. **The ASM libraries.** `org.appwork.testframework` is pulled into the compile through the source
+   path and needs `org.objectweb.asm`, which the repository does not ship either. The five ASM 9.7
+   jars are placed in `AppWorkUtils/libs`.
+
+Without them the build fails with 100 javac errors; with them it ends in `BUILD SUCCESSFUL`.
+
+**What was verified against the running engine** (`java -jar JDownloader.jar`):
+
+| Capability | Result |
+|---|---|
+| The engine starts | **yes** - the window "JDownloader 2" opens |
+| The MediaFire folder plugin | **yes** - `mediafire.com/folder/dpqhf3ughd4j5/libs` was resolved by the engine's own plugin into 5 files |
+| The transfer | **yes** - all 5 files landed on disk with the exact expected sizes (H2DB.jar 1,470,073 B, metrics-R7-FEmod.jar 10,194 B, mysql-connector-java-bin.jar 832,960 B, pircbotx-1.9.jar 197,245 B, worldedit-5.4.6-SNAPSHOT.jar 756,288 B) |
+| The local API (port 3128) | **yes** - `queryPackages`, `linkcollector/queryLinks`, `addLinksAndStartDownload`, `pause`, `enableLinks`, `disableLinks`, `removeLinks` all answer |
+| `downloads/queryLinks` | **no** - `INTERNAL_SERVER_ERROR` in this revision (an upstream bug in the V2 storable conversion); the link collector serves the same ids |
+
+The client for that API is `tools/arkload/engine.py` (with `tests/test_arkload_engine.py`).
+
+**Licence of the official sources** (section 2.4 applies, plus one more): the trunk and the plugins
+are **GPLv3+**, and the AppWork libraries (`AppWorkUtils`, `MyJDownloaderClient`) are **AGPL-3.0 for
+non-commercial use** - a commercial use needs a licence from AppWork GmbH. A redistributed ArkLoad
+built on the engine would therefore be **AGPL-3.0** (or commercially licensed), and the attribution
+and the corresponding source would have to travel with it.
 
 ## 3. The MediaFire downloader audit (this repository)
 
@@ -243,6 +300,7 @@ the model, the engine, the window and the dialogs.
 | Table model, states, filters | `arkload/download_model.py` | **keep** |
 | Window, dialogs, preferences, styles | `arkload/*` | **keep** - the ArkLoad interface |
 | Upstream MediaFire plugin | JDownloader mirror | **use as the parity specification, not as code** (GPLv3) |
+| The JDownloader engine itself | the official SVN sources | **optional backend** - builds and runs (section 2.5), driven by `arkload/engine.py` |
 | Queue / scheduling / chunking / link collection / extraction | JDownloader closed core | **not available** - written by us where it matters |
 
 ## 6. The integration decision
@@ -251,12 +309,19 @@ The three approaches of the brief were evaluated against the audit:
 
 | Approach | Verdict |
 |---|---|
-| **A - extend the Java implementation** | **Not executable.** The engine core is closed and the public snapshot does not compile (see 2.2.1). It would also make ArkLoad a GPLv3 work. |
-| **B - Python as an internal helper** | **Its premise fails**: the Java side that would own the queue cannot be built or run. A helper without an engine to talk to is just the existing application. |
-| **C - a separate frontend** | Only meaningful with a working engine interface. The existing PySide6 window already is that frontend, and it works. |
+| **A - extend the Java implementation** | **Now executable** (section 2.5): the official SVN sources build and the engine runs. The cost is the licence (AGPL-3.0 for the AppWork libraries, GPLv3+ for the plugins), a Java runtime and the Swing interface. |
+| **B - Python as an internal helper** | **The premise now holds**: the Java engine exists and exposes a local API that Python drives (section 2.5). A helper without an engine to talk to is just the existing application - that part was always true. |
+| **C - a separate frontend** | **The interface is now verified**: `tools/arkload/engine.py` drives the running engine over its local API. The PySide6 window can be pointed at the Java engine instead of the Python one. |
 
-**Decision: keep one engine, one queue - the proven Python one - and take JDownloader's
-*architecture* rather than its code.**
+**Decision (unchanged in the shipped product, now with a proven alternative): keep one engine,
+one queue - the proven Python one - and take JDownloader's *architecture* rather than its code.**
+
+The Java engine is no longer an unreachable dream (section 2.5): it builds, it runs and it can be
+driven from Python. It is therefore a **documented, available alternative backend**, not the
+shipped default. The reasons to keep the Python engine as the default are unchanged and now have
+one more: the Python engine carries **the MediaFire functionality that ArkLoad adds on top of
+JDownloader** (SHA-256 verification against the source, the per file states, the manifests), and
+the Java engine would drag AGPL-3.0 into the distribution.
 
 What is taken from JDownloader is the part that is genuinely good and can be reimplemented
 without copyleft: the **host plugin contract**.  A host plugin recognises the links of one
@@ -294,18 +359,19 @@ asks for - with the host plugin ecosystem as the extension point.
 * **Plugin API**: an add-on is a folder with `addon.json` and `setup(api)` (already implemented in
   `arkload/addons.py`); it can register a host resolver, a post processor or a menu action.
 * **The upstream plugin is the parity checklist** - see `docs/MEDIAFIRE-PARITY.md`.
-* **The Java route is closed**: the engine core is not in the source and not open, so a Java based
-  ArkLoad is not buildable from the supplied input. If the closed modules are ever supplied, the
-  documented alternative (a localhost protocol between the ArkLoad UI and a Java engine) can be
-  evaluated - but it would make ArkLoad a GPLv3 product.
+* **The Java route is open now, but licence heavy**: the official sources build and run
+  (section 2.5) and the localhost protocol between the ArkLoad UI and the Java engine exists and
+  is verified (`tools/arkload/engine.py`). It would make a distributed ArkLoad an **AGPL-3.0**
+  product (GPLv3+ for the plugins, AGPL-3.0 non-commercial for the AppWork libraries, a paid
+  AppWork licence for commercial use). The Python engine stays the default.
 
 ## 7. Risks and licensing
 
 | Risk | Level | Mitigation |
 |---|---|---|
-| JDownloader 2 is GPLv3 and its core is closed | **high, decisive** | ArkLoad keeps its own engine and stays permissively licensed. The upstream plugin is read as a specification, never copied. |
-| The JDownloader engine cannot be built from the mirror | high | Confirmed by the missing `JDClosed` and the other five checkouts. The recommended architecture does not need it. |
-| No Ant/Maven/Gradle installed | low | Only relevant for the Java route, which is not viable. |
+| The JDownloader engine is GPLv3+/AGPL-3.0 | **high, decisive for the Java route** | ArkLoad keeps its own engine and stays permissively licensed. The upstream plugin is read as a specification, never copied. The Java engine stays an optional backend. |
+| The engine build depends on two local changes (the `ide` package, the ASM jars) | medium | Both changes live in `packaging/jdownloader/build_engine.ps1`, are documented in section 2.5 and are applied to the checkout, never to the upstream repository. |
+| The engine needs Ant 1.10 and a JDK 25 next to it | low | Only for the optional Java backend; the shipped ArkLoad needs neither. |
 | MediaFire's public API is undocumented and may change | medium | All API calls live in one module, the planner falls back to scraping, and the tests use recorded fixtures. |
 | Expiring direct download URLs | low | Resolved per attempt, never stored (same rule as the upstream plugin). |
 | Naming: "ArkLoad" / "Modern Download Manager" may collide with trademarks | low | A trademark and name availability check before the first public release. |

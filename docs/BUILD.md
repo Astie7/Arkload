@@ -107,3 +107,30 @@ ArkLoad.exe --settings <file>           use another settings file
 
 The binaries are not code signed, so Windows SmartScreen warns on the first start. A release that
 has to avoid that needs a certificate and a `signtool` step in `packaging\build.ps1`.
+
+## The optional JDownloader engine backend
+
+ArkLoad can also drive the official JDownloader 2 engine instead of its own Python engine. The
+engine is not part of the release; it is built from the official upstream repositories on demand:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\jdownloader\build_engine.ps1
+```
+
+The script checks out the four upstream SVN repositories (`svn://svn.appwork.org/utils`,
+`svn://svn.jdownloader.org/jdownloader/{browser,trunk,MyJDownloaderClient}`), applies the two
+documented build fixes and runs the documented Ant build:
+
+```powershell
+ant -Dbasedir=JDownloader -f JDownloader/build/newBuild/build_standalone.xml
+```
+
+The result is `JDownloader/standalone/dist/JDownloader.jar`. To let ArkLoad talk to it, enable the
+local API in `cfg/org.jdownloader.api.RemoteAPIConfig.json`:
+
+```json
+{"port":3128,"externinterfaceenabled":true,"deprecatedapienabled":true,
+ "jdanywhereapienabled":false,"externinterfacelocalhostonly":true,"enabled":true}
+```
+
+`tools/arkload/engine.py` is the client for that API.
