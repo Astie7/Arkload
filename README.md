@@ -1,9 +1,7 @@
 # ArkLoad
 
-**A MediaFire download manager** - a desktop download manager for MediaFire folders and files,
-
-A desktop download manager for **MediaFire** folders and files, with a dark interface in the
-style of the new Free Download Manager.
+**Modern Download Manager** - a desktop download manager for **MediaFire** folders and files,
+with a dark interface in the style of the new Free Download Manager.
 
 ArkLoad is a normal Windows application: it installs with a setup program, keeps its data in your
 user profile and needs no Python of its own.
