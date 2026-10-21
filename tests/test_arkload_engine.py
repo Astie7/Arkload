@@ -72,7 +72,8 @@ def test_the_task_controls_are_sent(engine):
     assert "pause" in fake.calls[-1]
     assert client.resume([1, 2]) is True
     assert "enableLinks" in fake.calls[-1]
-    assert "linkIds=1" in fake.calls[-1]
+    # the engine wants the ids as one json array
+    assert "linkIds=%5B1%2C2%5D" in fake.calls[-1]
     assert client.cancel([3]) is True
     assert "disableLinks" in fake.calls[-1]
     assert client.remove([4]) is True

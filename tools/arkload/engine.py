@@ -45,8 +45,7 @@ class JDownloaderEngine:
             path += "?" + urllib.parse.urlencode(
                 {"queryParams": json.dumps(query, separators=(",", ":"))})
         elif named:
-            # a list of ids goes over the wire as a repeated parameter
-            path += "?" + urllib.parse.urlencode(named, doseq=True)
+            path += "?" + urllib.parse.urlencode(named)
         connection = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
         try:
             connection.request("GET", path)
@@ -108,21 +107,27 @@ class JDownloaderEngine:
                            extractPassword="", downloadPassword="")
         return bool(result)
 
+    @staticmethod
+    def _ids(link_ids: Iterable[int]) -> str:
+        """The engine wants the ids as one json array: ``linkIds=[1,2]``."""
+        return json.dumps([int(i) for i in link_ids], separators=(",", ":"))
+
     def pause(self, link_ids: Iterable[int]) -> bool:
+        """Pause the running downloads (the engine pauses all of them)."""
         return bool(self.call("downloads", "pause", value="true"))
 
     def resume(self, link_ids: Iterable[int]) -> bool:
         """Continue the paused links (the engine calls it *enable*)."""
-        return bool(self.call("downloads", "enableLinks", linkIds=list(link_ids)))
+        return bool(self.call("downloads", "enableLinks", linkIds=self._ids(link_ids)))
 
     def cancel(self, link_ids: Iterable[int]) -> bool:
         """Stop the links (the engine calls it *disable*)."""
-        return bool(self.call("downloads", "disableLinks", linkIds=list(link_ids)))
+        return bool(self.call("downloads", "disableLinks", linkIds=self._ids(link_ids)))
 
     def remove(self, link_ids: Iterable[int]) -> bool:
         """Take the links out of the queue."""
-        return bool(self.call("downloads", "removeLinks", linkIds=list(link_ids)))
+        return bool(self.call("downloads", "removeLinks", linkIds=self._ids(link_ids)))
 
     def force(self, link_ids: Iterable[int]) -> bool:
         """Start the links again."""
-        return bool(self.call("downloads", "forceDownload", linkIds=list(link_ids)))
+        return bool(self.call("downloads", "forceDownload", linkIds=self._ids(link_ids)))
