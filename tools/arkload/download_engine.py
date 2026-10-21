@@ -34,7 +34,7 @@ except ImportError:  # direct script run
 from . import settings as settings_store
 from .download_model import (COMPLETE, DownloadRecord, INCOMPLETE, RUNNING, records_from_manifests)
 
-REPO_URL = "https://github.com/rehan-remade/ArkLoadDownloader"
+REPO_URL = "https://github.com/rehan-remade/ArkLoad"
 ISSUES_URL = f"{REPO_URL}/issues"
 
 

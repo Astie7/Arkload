@@ -347,7 +347,7 @@ class AboutDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 16)
         layout.setSpacing(10)
-        title = QLabel("ArkLoad Download Manager")
+        title = QLabel("ArkLoad")
         title.setObjectName("Heading")
         layout.addWidget(title)
         text = QLabel(

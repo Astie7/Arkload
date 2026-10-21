@@ -43,7 +43,7 @@ path and the links of the selected download.
 ## Install
 
 Download the setup program from the releases and run it.  It installs into
-`%ProgramFiles%\ArkLoadDownloader`, adds a Start Menu entry and never touches your downloads
+`%ProgramFiles%\ArkLoad`, adds a Start Menu entry and never touches your downloads
 or your settings when you uninstall it.
 
 ## Run it from the sources
@@ -69,17 +69,17 @@ It creates
 
 | | |
 |---|---|
-| `dist\ArkLoadDownloader\` | the folder build (starts instantly) |
-| `dist\ArkLoadDownloader.exe` | the single file build |
-| `release\ArkLoadDownloader-Setup.exe` | the installer (Inno Setup) |
+| `dist\ArkLoad\` | the folder build (starts instantly) |
+| `dist\ArkLoad.exe` | the single file build |
+| `release\ArkLoad-Setup.exe` | the installer (Inno Setup) |
 
 The build needs `pyinstaller` and, for the installer, [Inno Setup 6](https://jrsoftware.org/isinfo.php).
 
 ## Use it from the command line
 
 ```
-ArkLoadDownloader.exe --add https://www.mediafire.com/folder/abc123 --destination D:\Mods
-ArkLoadDownloader.exe --add <url> --headless --exit-when-done
+ArkLoad.exe --add https://www.mediafire.com/folder/abc123 --destination D:\Mods
+ArkLoad.exe --add <url> --headless --exit-when-done
 ```
 
 `--headless` runs the transfers without a window, which is handy for scripts and for the browser

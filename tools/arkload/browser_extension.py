@@ -14,7 +14,7 @@ EXTENSION_DIR = Path.home() / ".mediafire-dl" / "browser-extension"
 
 MANIFEST = {
     "manifest_version": 3,
-    "name": "ArkLoad - MediaFire Download Manager",
+    "name": "ArkLoad - Modern Download Manager",
     "version": "1.0",
     "description": "Put a MediaFire link on the clipboard for the ArkLoad download manager.",
     "permissions": ["tabs", "clipboardWrite"],
@@ -54,7 +54,7 @@ POPUP_HTML = """<!doctype html>
            border-radius: 6px; padding: 8px; font-weight: 600; cursor: pointer; }
   #status { margin-top: 8px; color: #22C55E; min-height: 16px; }
 </style></head><body>
-<h1>ArkLoad - MediaFire Download Manager</h1>
+<h1>ArkLoad - Modern Download Manager</h1>
 <p>Copies the link of this page to the clipboard. Paste it in ArkLoad with Ctrl+V.</p>
 <button id="copy">Copy the link</button>
 <div id="status"></div>

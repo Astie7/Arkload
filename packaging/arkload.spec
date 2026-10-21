@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller build of the ArkLoad desktop application.
 
-    pyinstaller packaging/arkload.spec                  -> dist/ArkLoadDownloader/  (folder build)
-    ArkLoad_ONEFILE=1 pyinstaller packaging/arkload.spec    -> dist/ArkLoadDownloader.exe (single file)
+    pyinstaller packaging/arkload.spec                  -> dist/ArkLoad/  (folder build)
+    ArkLoad_ONEFILE=1 pyinstaller packaging/arkload.spec    -> dist/ArkLoad.exe (single file)
 
 The user data (settings, download manifests, add-ons) is never written into the build: the
 application uses %LOCALAPPDATA%\\ArkLoad for it.
@@ -59,7 +59,7 @@ a = Analysis(
 pyz = PYZ(a.pure)
 
 common = dict(
-    name="ArkLoadDownloader",
+    name="ArkLoad",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -100,5 +100,5 @@ else:
         strip=False,
         upx=False,
         upx_exclude=[],
-        name="ArkLoadDownloader",
+        name="ArkLoad",
     )

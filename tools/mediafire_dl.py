@@ -73,7 +73,7 @@ def parse_source(url: str) -> Source:
     """Accept a MediaFire folder/file URL, a bare folder key or a short file link."""
     raw = url.strip()
     if re.fullmatch(r"[A-Za-z0-9_-]+", raw):
-        return Source("folder", raw)  # the old console client's `ArkLoadDownloader <folder key>`
+        return Source("folder", raw)  # the old console client's `ArkLoad <folder key>`
     if not re.match(r"^[a-z][a-z0-9+.-]*://", raw, re.I):
         raw = "https://" + raw
     parts = urllib.parse.urlsplit(raw)

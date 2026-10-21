@@ -2,7 +2,7 @@
 
     python tools/arkload/main.py
     python -m tools.arkload.main
-    dist\\ArkLoadDownloader\\ArkLoadDownloader.exe
+    dist\\ArkLoad\\ArkLoad.exe
 
 The packaged build runs this file: it sets the application name and the icon, and it shows a
 message box instead of a silent crash when something goes wrong during the start-up.
@@ -49,7 +49,7 @@ def application_icon() -> QIcon:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="ArkLoadDownloader", description=APP_NAME)
+    parser = argparse.ArgumentParser(prog="ArkLoad", description=APP_NAME)
     parser.add_argument("--state-dir", help="folder for the download manifests")
     parser.add_argument("--settings", help="path of the settings file")
     parser.add_argument("--add", action="append", metavar="URL", default=[],

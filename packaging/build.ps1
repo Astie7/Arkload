@@ -1,12 +1,12 @@
 <#
-    Builds the Windows distribution of ArkLoad - MediaFire Download Manager.
+    Builds the Windows distribution of ArkLoad - Modern Download Manager.
 
         powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 
     It creates
-        dist\ArkLoadDownloader\           the folder build (the one the installer uses)
-        dist\ArkLoadDownloader.exe        the single file build
-        release\ArkLoadDownloader-Setup.exe   the installer
+        dist\ArkLoad\           the folder build (the one the installer uses)
+        dist\ArkLoad.exe        the single file build
+        release\ArkLoad-Setup.exe   the installer
     and keeps the temporary files in build\.
 #>
 param(

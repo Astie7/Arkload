@@ -1,5 +1,5 @@
 @echo off
-rem ArkLoad - MediaFire Download Manager.
+rem ArkLoad - Modern Download Manager.
 rem This is the one and only application: it starts the PySide6 window when PySide6 is
 rem installed and falls back to the classic Tkinter window when it is not.
 setlocal

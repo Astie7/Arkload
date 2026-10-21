@@ -18,12 +18,12 @@ VSVersionInfo(
         StringTable(
           '040904B0',
           [StringStruct('CompanyName', 'Rehan'),
-           StringStruct('FileDescription', 'ArkLoad Download Manager'),
+           StringStruct('FileDescription', 'Modern Download Manager'),
            StringStruct('FileVersion', '1.0.0.0'),
-           StringStruct('InternalName', 'ArkLoadDownloader'),
+           StringStruct('InternalName', 'ArkLoad'),
            StringStruct('LegalCopyright', ''),
-           StringStruct('OriginalFilename', 'ArkLoadDownloader.exe'),
-           StringStruct('ProductName', 'ArkLoad - MediaFire Download Manager'),
+           StringStruct('OriginalFilename', 'ArkLoad.exe'),
+           StringStruct('ProductName', 'ArkLoad'),
            StringStruct('ProductVersion', '1.0.0.0')])
       ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])

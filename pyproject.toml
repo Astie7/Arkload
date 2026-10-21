@@ -1,7 +1,7 @@
 [project]
 name = "arkload"
 version = "1.0.0"
-description = "ArkLoad Download Manager: a desktop download manager for MediaFire folders and files with resumption, per file status detection and SHA-256 integrity verification."
+description = "ArkLoad - Modern Download Manager: a desktop download manager for MediaFire folders and files with resumption, per file status detection and SHA-256 integrity verification."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

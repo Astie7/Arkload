@@ -1,4 +1,4 @@
-; Inno Setup script for ArkLoad - MediaFire Download Manager.
+; Inno Setup script for ArkLoad - Modern Download Manager.
 ;
 ; Build it with:
 ;     iscc packaging\installer.iss
@@ -7,13 +7,13 @@
 ; creates the shortcuts and an uninstaller.  The user's settings, download list and add-ons stay
 ; in %LOCALAPPDATA%\ArkLoad - they are never touched by the installation or the uninstallation.
 
-#define AppName "ArkLoad - MediaFire Download Manager"
+#define AppName "ArkLoad - Modern Download Manager"
 #define AppShortName "ArkLoad"
 #define AppVersion "1.0"
 #define AppPublisher "Rehan"
-#define AppURL "https://github.com/rehan-remade/ArkLoadDownloader"
-#define AppExeName "ArkLoadDownloader.exe"
-#define SourceDir "..\dist\ArkLoadDownloader"
+#define AppURL "https://github.com/rehan-remade/ArkLoad"
+#define AppExeName "ArkLoad.exe"
+#define SourceDir "..\dist\ArkLoad"
 #define IconFile "assets\arkload.ico"
 
 [Setup]
@@ -25,11 +25,11 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
 AppUpdatesURL={#AppURL}
-DefaultDirName={autopf}\ArkLoadDownloader
+DefaultDirName={autopf}\ArkLoad
 DefaultGroupName={#AppShortName}
 DisableProgramGroupPage=yes
 OutputDir=..\release
-OutputBaseFilename=ArkLoadDownloader-Setup
+OutputBaseFilename=ArkLoad-Setup
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/max
