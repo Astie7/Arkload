@@ -6,8 +6,6 @@ with a dark interface in the style of the new Free Download Manager.
 ArkLoad is a normal Windows application: it installs with a setup program, keeps its data in your
 user profile and needs no Python of its own.
 
-![the download list](docs/screenshot-list.png)
-
 ## What it does
 
 * **Downloads whole folders** - a MediaFire folder link is expanded into every file and
@@ -26,11 +24,6 @@ user profile and needs no Python of its own.
 * **Keeps its list** - the downloads, their tags and their priority survive a restart.
 
 ## The interface
-
-| | |
-|---|---|
-| ![the new download window](docs/screenshot-dialog.png) | The **New download** window: the link, the folder, the name, the scheduler and the free space on the drive. |
-| ![the preferences](docs/screenshot-preferences.png) | The preferences: general, browser integration, network, traffic limits, BitTorrent and advanced. |
 
 The toolbar holds the selection, the sort and the filter, the **+ Add download** button, the
 search field and the main menu.  Below it is the list of downloads; at the bottom the status bar
