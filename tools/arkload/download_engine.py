@@ -309,7 +309,12 @@ class DownloadEngine(QObject):
             self.job_error.emit(record.job_id, str(e))
             return
         record.state = TaskState.RUNNING
-        record.external_id = backend.external_id(backend.tasks[record.job_id])
+        task = backend.tasks.get(record.job_id)
+        if task is not None:
+            record.external_id = backend.external_id(task)
+        if record.job_id in getattr(backend, "pending", {}):
+            # the engine is still starting - the link waits for it
+            record.state = TaskState.QUEUED
         self.job_changed.emit(record.job_id)
 
     def _start(self, record: DownloadRecord, options: EngineOptions,
