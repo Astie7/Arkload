@@ -11,3 +11,7 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+# the engines of ArkLoad: they are built and staged by packaging\build_engines.ps1
+# (they are 260 MB of binaries and they carry their own licences)
+packaging/engines/

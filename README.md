@@ -1,94 +1,56 @@
-# ArkLoad
 
-**Modern Download Manager**: a Windows desktop download manager for MediaFire folders and files, direct downloads, and other supported hosting services. Features include download resumption, per-file status detection, SHA-256 verification, segmented transfers, and a modern dark interface inspired by Free Download Manager.
+* **Downloads whole folders** - a MediaFire folder link is expanded into every file and
+  sub-folder, with a file filter (`*.jar`, `mods/*`, …) if you want only some of them.
+* **Resumes** - an interrupted transfer continues at the byte it stopped at, after a crash, a
+  restart or a lost connection.
+* **Detects what is missing** - every file of a download is tracked on its own
+  (*missing*, *incomplete*, *downloading*, *completed*, *verification failed*, *failed*), so a
+  folder that was only half downloaded is finished instead of started again.
+* **Verifies every file** - MediaFire publishes a SHA-256 for each file; ArkLoad compares the
+  download with it. A file that does not match is downloaded again and checked again.
+* **Downloads several parts of a file at once** (`Connections per file` in the preferences), with
+  the state of every part kept on disk, so even a split transfer continues where it stopped.
+* **A real speed limiter** - the snail button in the status bar caps the transfer rate.
+* **MediaFire folder keys** - a bare key such as `dpqhf3ughd4j5` works as well as a link.
+* **Keeps its list** - the downloads, their tags and their priority survive a restart.
+* **Knows thousands of hosts** - every link that is not a MediaFire link is downloaded by the
+  **JDownloader 2 engine**, which runs hidden in the background.  You never see a JDownloader
+  window: ArkLoad is the program you work with.  The MediaFire downloads keep running on
+  ArkLoad's own engine, with the SHA-256 verification.
 
-ArkLoad is a normal Windows application that installs through a setup program, stores its data in your user profile, and does not require a separate Python installation.
+### The engines
 
-## What it does
+ArkLoad brings its engines with it - the user does not install or configure anything:
 
-- **Downloads whole folders**: expands MediaFire folder links into their files and subfolders, with optional file filters such as `*.jar` or `mods/*`.
-- **Resumes interrupted downloads**: continues transfers from saved progress after a crash, restart, or connection loss, whenever supported.
-- **Tracks every file independently**: distinguishes between missing, incomplete, downloading, completed, verification failed, and failed files, allowing incomplete folders to resume without unnecessarily restarting completed files.
-- **Verifies file integrity**: compares downloaded files against available SHA-256 checksums and retries downloads when verification fails.
-- **Supports segmented downloads**: downloads multiple parts of a file concurrently, preserving part information where supported.
-- **Limits download speed**: controls the transfer rate through the speed limiter in the status bar.
-- **Accepts MediaFire folder keys**: supports bare folder keys as well as full links.
-- **Persists download information**: retains the download list, tags, priorities, and supported metadata across restarts.
-- **Supports multiple hosting services**: handles MediaFire and other supported hosting services, alongside direct downloads.
-- **Provides a unified experience**: download management, progress reporting, and controls remain consistent throughout the application.
+* **ArkLoad itself** downloads the MediaFire links and verifies every file against the hash
+  MediaFire publishes,
+* **JDownloader 2** (with the Java runtime it needs) downloads the hosters and the websites it
+  knows the plugins for,
+* **aria2** downloads the direct links and the other simple protocols.
 
-## The interface
+ArkLoad picks the engine on its own: a host it knows itself goes to its own downloader, a website
+to JDownloader and a direct file to aria2.  When an engine reports that it does not know a
+link, the next one may try it - but a download that failed because of a password, a permission or
+an expired link is never handed to a second engine.
 
-ArkLoad features a modern dark interface inspired by Free Download Manager, with its own identity and download-management workflows.
+The engines are started in the background when they are needed, driven through their local
+interfaces and stopped again when ArkLoad closes.  The preferences tell the user which engines
+are there.
 
-- **Menu bar**: provides File, Downloads, Settings, Tools, and Help commands.
-- **Command bar**: provides download creation and transfer controls, search, and additional actions.
-- **Navigation bar**: organizes active downloads, links awaiting processing, and download history.
-- **Download list**: displays filenames, sizes, statuses, progress, transfer speeds, remaining time, and other relevant details.
-- **Context menus**: provide actions appropriate to the selected download. Right-clicking a row opens the menu for the item under the cursor.
-- **Download details**: shows the selected transfer's destination, progress, and associated files.
-- **Overview**: summarizes active transfers, total speed, transferred data, remaining time, and connection activity.
-- **Status bar**: displays transfer speeds, speed-limit controls, settings access, and selected-download information.
+The engines are separate programs with their own licences (JDownloader 2 is GPLv3+/AGPL, aria2
+is Apache 2.0, the Java runtime is GPLv2 with the Classpath Exception); the notice of them is
+in the `engines` folder of the installation.
 
-The interface maintains a consistent experience across supported downloads and hosting services.
+### Building the engines
 
-## Install
-
-Download the setup program from the releases and run it. The installer places ArkLoad in `%ProgramFiles%\ArkLoad` and adds a Start Menu entry. Uninstalling the application does not remove your downloads or personal settings.
-
-## Run it from the sources
-
-```bash
-pip install -r requirements.txt
-python tools/arkload/main.py
-```
-
-The classic Tkinter window remains available:
-
-```bash
-python tools/mediafire_gui.py
-```
-
-## Build the Windows application
+The engines are not part of the repository (they are 260 MB of binaries).  They are built and
+staged with one script:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File packaging\build.ps1
+powershell -ExecutionPolicy Bypass -File packaging\build_engines.ps1
 ```
 
-The build produces:
-
-- `dist\ArkLoad\`: folder distribution.
-- `dist\ArkLoad.exe`: single-file executable.
-- `release\ArkLoad-Setup.exe`: Windows installer.
-
-The build requires PyInstaller and, for the installer, [Inno Setup 6](https://jrsoftware.org/isinfo.php).
-
-## Command-line usage
-
-```text
-ArkLoad.exe --add https://www.mediafire.com/folder/abc123 --destination D:\Mods
-ArkLoad.exe --add <url> --headless --exit-when-done
-```
-
-The `--headless` option runs transfers without opening a window, making it useful for scripts and browser integrations.
-
-## Browser integration
-
-Use **Main menu → Browser Integration → Create the extension** to generate an unpacked extension in `%LOCALAPPDATA%\ArkLoad\browser-extension`. Load it in Chrome or Edge using the browser's extension developer tools.
-
-The extension helps transfer links from the browser to ArkLoad.
-
-## Where the data lives
-
-| Data | Location |
-|---|---|
-| Settings | `%LOCALAPPDATA%\ArkLoad\gui-settings.json` |
-| Download list and manifests | `%LOCALAPPDATA%\ArkLoad\jobs\` |
-| Add-ons | `%LOCALAPPDATA%\ArkLoad\addons\` |
-| Logs | `%LOCALAPPDATA%\ArkLoad\arkload.log` |
-
-ArkLoad keeps user data outside its installation directory.
-
-## License
-
-ArkLoad's licensing terms are defined in `LICENSE`. Third-party libraries and components retain their respective licenses.
+It builds the JDownloader 2 engine from the official sources (or reuses the build of
+`packaging\jdownloader\build_engine.ps1`), downloads the Java runtime (Eclipse Temurin) and the
+official Windows build of aria2, and stages everything into `packaging\engines`.  The installer
+puts them into `%LOCALAPPDATA%\ArkLoad\engines`, where the application finds them on its own.

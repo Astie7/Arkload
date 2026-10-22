@@ -244,6 +244,17 @@ QPushButton#Danger {{
 QPushButton#Danger:hover {{ background-color: {p['danger']}; color: #FFFFFF;
                             border-color: {p['danger']}; }}
 
+/* the path listing of the delete dialog */
+QPlainTextEdit#DeleteListing {{
+    background-color: {p['elevated']};
+    color: {p['text']};
+    border: 1px solid {p['border_soft']};
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    selection-background-color: {p['selection']};
+}}
+
 QToolButton {{
     background-color: transparent;
     border: 1px solid transparent;

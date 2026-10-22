@@ -122,82 +122,44 @@ class PreferencesView(QWidget):
 
     # -- pages ----------------------------------------------------------------
     def _build_engine(self, layout: QVBoxLayout) -> None:
-        """The engine that downloads the links of the hosts ArkLoad does not know itself."""
-        from .jdownloader import find_engine
+        """The engines of ArkLoad: they are bundled, the user does not choose one."""
+        from .engines import resources
 
         intro = QLabel(
-            "ArkLoad downloads the MediaFire links with its own engine, which verifies every "
-            "file against the SHA-256 MediaFire publishes.  Every other link is downloaded by "
-            "the JDownloader 2 engine: it runs hidden in the background, so no JDownloader "
-            "window is ever shown.")
+            "ArkLoad brings its engines with it.  The MediaFire links are downloaded by ArkLoad "
+            "itself, which verifies every file against the hash MediaFire publishes.  The other "
+            "links go to JDownloader 2, which knows the hosters, or to aria2, which is fast for "
+            "the direct links.  ArkLoad picks the engine on its own.")
         intro.setWordWrap(True)
         intro.setObjectName("Muted")
         layout.addWidget(intro)
-
-        form = QFormLayout()
-        form.setSpacing(10)
-        self.engine_edit = QLineEdit(self.settings.get("engine_path", ""))
-        self.engine_edit.setPlaceholderText("The folder or the JDownloader.jar of the engine")
-        self.engine_edit.setMaximumWidth(520)
-        self.engine_edit.textChanged.connect(self._on_engine_settings)
-        form.addRow("JDownloader engine", self.engine_edit)
-
-        self.engine_port_spin = QSpinBox()
-        self.engine_port_spin.setRange(1024, 65535)
-        self.engine_port_spin.setMaximumWidth(140)
-        self.engine_port_spin.setValue(int(self.settings.get("engine_port", 3128) or 3128))
-        self.engine_port_spin.valueChanged.connect(self._on_engine_settings)
-        form.addRow("Local API port", self.engine_port_spin)
-        layout.addLayout(form)
-
-        row = QHBoxLayout()
-        browse = QPushButton("Choose the engine…")
-        browse.clicked.connect(self._choose_engine)
-        row.addWidget(browse)
-        test = QPushButton("Test the connection")
-        test.clicked.connect(self._test_engine)
-        row.addWidget(test)
-        row.addStretch(1)
-        layout.addLayout(row)
 
         self.engine_label = QLabel("")
         self.engine_label.setObjectName("Muted")
         self.engine_label.setWordWrap(True)
         layout.addWidget(self.engine_label)
+        self._update_engine_label()
 
-        found = find_engine(self.engine_edit.text().strip() or None)
-        if found:
-            self.engine_label.setText(f"The engine is there: {found}")
-        elif self.engine_edit.text().strip():
-            self.engine_label.setText("There is no JDownloader.jar at that place.")
-        else:
-            self.engine_label.setText(
-                "No engine was found.  Build it with packaging/jdownloader/build_engine.ps1 and "
-                "point ArkLoad at the folder that holds JDownloader.jar.")
+    def _update_engine_label(self) -> None:
+        """Show where the engines are and whether they are ready."""
+        from .engines import resources
+        from .engines.aria2 import Aria2Engine
+        from .engines.jdownloader import JDownloaderEngine
 
-    def _choose_engine(self) -> None:
-        start = self.engine_edit.text().strip() or str(Path.home())
-        folder = QFileDialog.getExistingDirectory(self, "Choose the folder of the engine", start)
-        if folder:
-            self.engine_edit.setText(folder)
-            self._on_engine_settings()
+        rows = []
+        folder = resources.jdownloader_dir()
+        rows.append(("JDownloader 2", folder, JDownloaderEngine().available()))
+        aria2 = resources.aria2_exe()
+        rows.append(("aria2", aria2.parent if aria2 else None, Aria2Engine().available()))
+        lines = []
+        for name, path, available in rows:
+            if path is None:
+                lines.append(f"{name}: not installed with this copy of ArkLoad")
+            else:
+                state = "ready" if available else "installed, starts when it is needed"
+                lines.append(f"{name}: {path} ({state})")
+        self.engine_label.setText("\n".join(lines))
 
-    def _test_engine(self) -> None:
-        """Ask the engine whether it answers."""
-        from .engine import EngineError, JDownloaderEngine
-
-        path = self.engine_edit.text().strip()
-        port = int(self.engine_port_spin.value())
-        if not path:
-            self.engine_label.setText("Choose the engine first.")
-            return
-        client = JDownloaderEngine("127.0.0.1", port, timeout=5)
-        try:
-            packages = client.packages()
-        except EngineError as e:
-            self.engine_label.setText(f"The engine does not answer: {e}")
-            return
-        self.engine_label.setText(f"The engine answers: {len(packages)} download(s) in its list.")
     def _build_general(self, layout: QVBoxLayout) -> None:
         form = QFormLayout()
         form.setSpacing(10)
@@ -234,6 +196,13 @@ class PreferencesView(QWidget):
             "Creates a 'Run' entry in the Windows registry for this application.")
         self.launch_check.toggled.connect(self._on_launch)
         layout.addWidget(self.launch_check)
+        self.notify_check = QCheckBox("Show a message when a download finishes")
+        self.notify_check.setToolTip(
+            "A short message over the notification area of the taskbar when a download was "
+            "downloaded and verified.")
+        self.notify_check.setChecked(bool(self.settings.get("notify_complete", True)))
+        self.notify_check.toggled.connect(self._on_notify)
+        layout.addWidget(self.notify_check)
 
         label = QLabel("Default download folder")
         label.setObjectName("SubHeading")
@@ -256,7 +225,7 @@ class PreferencesView(QWidget):
         self.folder_edit.setEnabled(False)
         self.folder_edit.textChanged.connect(self._on_folder)
         self.folder_row.addWidget(self.folder_edit)
-        folder_btn = QPushButton("Browse…")
+        folder_btn = QPushButton("BrowseΓÇª")
         folder_btn.clicked.connect(self._choose_folder)
         self.folder_row.addWidget(folder_btn)
         layout.addLayout(self.folder_row)
@@ -412,6 +381,10 @@ class PreferencesView(QWidget):
     def _on_launch(self, checked: bool) -> None:
         self.launch_at_startup = checked
 
+    def _on_notify(self, checked: bool) -> None:
+        self.settings["notify_complete"] = checked
+        self._emit_settings()
+
     def _on_folder_mode(self, checked: bool) -> None:
         self.folder_edit.setEnabled(not checked)
         self._on_engine()
@@ -439,14 +412,6 @@ class PreferencesView(QWidget):
         self.options.cookies = self.cookies_edit.text().strip()
         if self.fixed_folder_radio.isChecked() and self.folder_edit.text().strip():
             self.options.destination = self.folder_edit.text().strip()
-        self._emit()
-
-    def _on_engine_settings(self) -> None:
-        """The JDownloader engine changed: it belongs to the settings and to the options."""
-        self.options.engine_path = self.engine_edit.text().strip()
-        self.options.engine_port = int(self.engine_port_spin.value())
-        self.settings_changed.emit({"engine_path": self.options.engine_path,
-                                    "engine_port": self.options.engine_port})
         self._emit()
 
     def _emit(self) -> None:
@@ -487,6 +452,7 @@ class PreferencesView(QWidget):
         theme = settings.get("theme", "dark")
         self.theme_combo.setCurrentText({"dark": "Dark", "light": "Light"}.get(theme, "Dark"))
         self.launch_check.setChecked(bool(settings.get("launch_at_startup", False)))
+        self.notify_check.setChecked(bool(settings.get("notify_complete", True)))
         self.folder_edit.setText(settings.get("destination", self.options.destination))
         if settings.get("fixed_folder"):
             self.fixed_folder_radio.setChecked(True)

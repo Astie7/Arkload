@@ -405,7 +405,7 @@ def test_the_row_menu_has_the_reference_entries(window, tmp_path):
     record.status = dm.COMPLETE
     menu = window._build_row_menu(record)
     labels = [action.text() for action in menu.actions()]
-    for expected in ("Pause", "Resume", "Cancel", "Open", "Show in folder", "Set priority",
+    for expected in ("Pause", "Resume", "Delete", "Open", "Show in folder", "Set priority",
                      "Rename file", "Move to...", "Delete file", "Remove from list", "Add mirror",
                      "Open download page", "Copy link", "Check for update", "File integrity",
                      "Schedule", "Change URL"):
@@ -625,9 +625,9 @@ def test_the_row_menu_offers_the_download_controls(window):
     record.status = "running"
     menu = window._build_row_menu(record)
     labels = {action.text(): action for action in menu.actions()}
-    assert "Pause" in labels and "Resume" in labels and "Cancel" in labels
+    assert "Pause" in labels and "Resume" in labels and "Delete" in labels
     assert labels["Pause"].isEnabled() is True
-    assert labels["Cancel"].isEnabled() is True
+    assert labels["Delete"].isEnabled() is True
     record.status = "paused"
     menu = window._build_row_menu(record)
     labels = {action.text(): action for action in menu.actions()}

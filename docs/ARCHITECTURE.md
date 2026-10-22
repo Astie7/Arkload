@@ -117,6 +117,16 @@ guess would suggest):
 //    (at your option) any later version.
 ```
 
+The engines that ArkLoad ships have their own licences, which travel with them:
+
+* the JDownloader sources are **GPLv3+**, the AppWork libraries (AppWorkUtils,
+  MyJDownloaderClient) are **AGPL-3.0** for a non-commercial use - a commercial use needs a
+  licence from AppWork GmbH,
+* aria2 is **Apache 2.0**,
+* the Java runtime (Eclipse Temurin) is **GPLv2 with the Classpath Exception**.
+
+The notice of them is in `packaging/engines/NOTICE.txt` and is installed with them.
+
 Consequences:
 
 * Copying the MediaFire plugin (or any other code) into ArkLoad makes ArkLoad a **GPLv3** work: the
@@ -215,7 +225,40 @@ with the SHA-256 verification against MediaFire's own hash.  The routing is in
 ``DownloadEngine.engine_of()``: a link a host plugin knows goes to ArkLoad's engine, every other
 link goes to the JDownloader engine.
 
-### 2.7 The interface
+### 2.7 The engines of ArkLoad
+
+ArkLoad has three engines behind its one queue.  They all offer the same interface
+(`tools/arkload/engines/base.py`): initialise and shut down, add a download, ask for the status
+and the progress, pause, resume, cancel, retry, and say what they can do
+(`Capabilities`) and whether they are there at all.
+
+| Engine | What it is | What it is good for |
+|---|---|---|
+| **ArkLoad** (`engines/builtin.py`) | the downloader of the application, the MediaFire one | the hosts ArkLoad knows: it verifies every file against the hash the service publishes |
+| **JDownloader 2** (`engines/jdownloader.py`) | the engine from the official sources, started headless | the hosters and the websites: the plugins, the link collectors, the folders, the torrents |
+| **aria2** (`engines/aria2.py`) | the small command line downloader, driven through its JSON-RPC interface | the direct links and the other simple protocols (HTTP, HTTPS, FTP) |
+
+**The routing** (`engines/registry.py`): the host ArkLoad knows itself goes to its own downloader,
+a website to JDownloader and a direct file to aria2.  The decision is made from the url and the
+capabilities of the engines - the user is never asked.
+
+**The fallback**: when an engine reports that it does not know the url (`ErrorKind.UNSUPPORTED`),
+the next engine that can handle the protocol may try it.  A download that failed because of a
+password, a permission, an expired link or a network problem is **not** handed to another engine:
+the other engine would fail the same way and the user would see the download twice.  The kinds of
+errors are in `engines/base.py` (`ErrorKind`).
+
+**Where the engines live** (`engines/resources.py`): the application data folder
+(`%LOCALAPPDATA%\ArkLoad\engines` - where the installer puts them), the program folder (a
+portable copy) and the source tree (the development build).  The first one that holds the engine
+wins; the user does not configure anything.  The Java runtime belongs to the engine and is
+started with it, so a clean Windows system needs no Java installation.
+
+**The process**: the engine is started in a thread (a JVM takes a while to come up, the window
+must not wait for it), driven through its local interface, and stopped when ArkLoad closes.  An
+engine that is already running is used as it is - the engine holds a lock on its folder.
+
+### 2.8 The interface
 
 The window is a mix of the two references: the frame of **Free Download Manager** and the
 download management of **JDownloader 2**.

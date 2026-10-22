@@ -47,14 +47,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "jdownloaderengine"; Description: "Install the JDownloader 2 engine (GPLv3+/AGPL)"; GroupDescription: "The download engine for the links of other hosts:"; Flags: unchecked; Check: JDownloaderEngineTask
+Name: "engines"; Description: "Install the download engines (JDownloader 2 and aria2)"; GroupDescription: "The engines of ArkLoad:"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "assets\arkload.ico"; DestDir: "{app}"; Flags: ignoreversion
-; the engine is a separate program - the user can leave the task unticked and point ArkLoad at
-; another build in the preferences
-Source: "jdownloader\engine\*"; DestDir: "{localappdata}\ArkLoad\engine"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: jdownloaderengine
+; the engines of ArkLoad: they are put into the data folder, where the program finds them
+Source: "engines\*"; DestDir: "{localappdata}\ArkLoad\engines"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: engines
+; the notice of the engines (the licences of the third party programs are in the engine folder)
+Source: "engines\NOTICE.txt"; DestDir: "{localappdata}\ArkLoad\engines"; Flags: ignoreversion; Tasks: engines
 
 [Icons]
 Name: "{group}\{#AppShortName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
@@ -65,12 +66,6 @@ Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#AppExeName}"; IconFile
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
-function JDownloaderEngineTask(): Boolean;
-begin
-  { the task is only offered when the engine was built next to the installer }
-  Result := DirExists(ExpandConstant('{src}\jdownloader\engine'));
-end;
-
 function InitializeSetup(): Boolean;
 var
   ResultCode: Integer;

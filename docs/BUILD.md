@@ -108,10 +108,38 @@ ArkLoad.exe --settings <file>           use another settings file
 The binaries are not code signed, so Windows SmartScreen warns on the first start. A release that
 has to avoid that needs a certificate and a `signtool` step in `packaging\build.ps1`.
 
-## The optional JDownloader engine backend
+## ## The engines of ArkLoad
 
-ArkLoad can also drive the official JDownloader 2 engine instead of its own Python engine. The
-engine is not part of the release; it is built from the official upstream repositories on demand:
+ArkLoad ships two engines next to the application: the **JDownloader 2** engine (with the Java
+runtime it needs) and **aria2**.  They are not part of the repository - they are 260 MB of
+binaries - so they are built and staged with one script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_engines.ps1
+```
+
+The script
+
+1. builds the JDownloader 2 engine from the official upstream repositories (or reuses the build
+   of `packaging\jdownloader\build_engine.ps1`),
+2. downloads the Java runtime the engine needs (Eclipse Temurin, 21 LTS),
+3. downloads the official Windows build of aria2,
+
+and stages everything into `packaging\engines`:
+
+```
+packaging/engines/
+  jdownloader/     the engine, its plugins, its licences and the Java runtime (jre/)
+  aria2/           aria2c.exe and its licence
+  NOTICE.txt       the licences of the engines
+```
+
+The installer copies that folder into `%LOCALAPPDATA%\ArkLoad\engines` (the task *Install the
+download engines*), where the application finds it on its own - the user does not have to install
+or to point at anything.  The source tree is the second place the application looks, so a
+development build works without the installer.
+
+### Building the JDownloader engine from the sources
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\jdownloader\build_engine.ps1
@@ -125,18 +153,22 @@ documented build fixes and runs the documented Ant build:
 ant -Dbasedir=JDownloader -f JDownloader/build/newBuild/build_standalone.xml
 ```
 
-The result is `JDownloader/standalone/dist/JDownloader.jar`. To let ArkLoad talk to it, enable the
-local API in `cfg/org.jdownloader.api.RemoteAPIConfig.json`:
+The result is `JDownloader/standalone/dist/JDownloader.jar`.
 
-```json
-{"port":3128,"externinterfaceenabled":true,"deprecatedapienabled":true,
- "jdanywhereapienabled":false,"externinterfacelocalhostonly":true,"enabled":true}
-```
+### How ArkLoad talks to the engines
 
-`tools/arkload/engine.py` is the client for that API.
+* **JDownloader 2** through its local API (port 3128, bound to localhost).  ArkLoad writes the
+  settings of the engine into its `cfg` folder and starts it headless, so no JDownloader window
+  appears:
 
-ArkLoad starts the engine itself when it is needed: `tools/arkload/jdownloader.py` writes the API
-settings into the engine's `cfg` folder, starts it with `-Djava.awt.headless=true` (so no
-JDownloader window appears) and stops it again when ArkLoad closes.  The location of the engine is
-a setting - in the application under **Preferences → Download Engine**, or in the settings file
-as `engine_path`.
+  ```json
+  {"deprecatedapiport":3128,"externinterfaceenabled":true,"deprecatedapienabled":true,
+   "jdanywhereapienabled":false,"externinterfacelocalhostonly":true,"enabled":true}
+  ```
+
+  The client is `tools/arkload/engine.py`, the engine behind the common interface is
+  `tools/arkload/engines/jdownloader.py`.
+
+* **aria2** through its JSON-RPC interface.  ArkLoad starts `aria2c` with the RPC interface on a
+  local port and a secret that is generated for every run, and talks to it with
+  `tools/arkload/engines/aria2.py`.

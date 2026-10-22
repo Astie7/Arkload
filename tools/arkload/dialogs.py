@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTime, Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPlainTextEdit, QPushButton, QTimeEdit, QToolButton,
                                QVBoxLayout, QWidget)
@@ -487,43 +487,72 @@ class DeleteDownloadsDialog(QDialog):
     def __init__(self, parent: QWidget | None = None, downloads=None):
         super().__init__(parent)
         self.setWindowTitle("Delete selected downloads")
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(470)
         self.delete_files = False
         downloads = list(downloads or [])
+        count = len(downloads)
+        plural = "" if count == 1 else "s"
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 16)
+        layout.setContentsMargins(22, 20, 22, 16)
         layout.setSpacing(10)
 
-        title = QLabel(f"Delete selected downloads ({len(downloads)})")
+        head = QVBoxLayout()
+        head.setSpacing(3)
+        title = QLabel(f"Delete selected downloads ({count})")
         title.setObjectName("Heading")
-        layout.addWidget(title)
+        head.addWidget(title)
+        question = QLabel(
+            f"Are you sure you want to delete the selected download{plural}? "
+            f"Choose what happens with its file{plural}:")
+        question.setObjectName("Muted")
+        question.setWordWrap(True)
+        head.addWidget(question)
+        layout.addLayout(head)
+
+        listing_header = QLabel("Paths of the download" + plural)
+        listing_header.setObjectName("SubHeading")
+        layout.addWidget(listing_header)
 
         listing = QPlainTextEdit()
+        listing.setObjectName("DeleteListing")
         listing.setReadOnly(True)
-        listing.setMaximumHeight(140)
+        listing.setFrameShape(QFrame.NoFrame)
+        listing.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        listing.setFixedHeight(96 if count > 1 else 56)
         for record in downloads:
             listing.appendPlainText(str(record.root or record.destination))
         layout.addWidget(listing)
 
-        self.remember_check = QCheckBox("Remember my choice")
-        self.remember_check.setToolTip(
-            "The next deletions use the same choice without asking again")
-        layout.addWidget(self.remember_check)
+        stays = "s" if count == 1 else ""        # the file stays / the files stay
+        # the files stay on the disk unless the user chooses "Delete files"
+        choice_hint = QLabel(
+            f"<b>Remove from list</b> only takes the download{plural} out of the list — "
+            f"the file{plural} stay{stays} on the disk. <b>Delete files</b> removes "
+            ("it" if count == 1 else "them") + " from the disk as well.")
+        choice_hint.setWordWrap(True)
+        layout.addWidget(choice_hint)
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
+        # the choice and the buttons share the last row, so the dialog ends in one line
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
+        footer.addStretch(1)
         cancel = QPushButton("Cancel")
+        cancel.setToolTip("Close the dialog; nothing changes")
         cancel.clicked.connect(self.reject)
-        buttons.addWidget(cancel)
+        footer.addWidget(cancel)
         self.remove_button = QPushButton("REMOVE FROM LIST")
+        self.remove_button.setToolTip(
+            "Take the download out of the list; the files stay on the disk")
         self.remove_button.clicked.connect(self._remove)
-        buttons.addWidget(self.remove_button)
+        footer.addWidget(self.remove_button)
         self.delete_button = QPushButton("DELETE FILES")
         self.delete_button.setObjectName("Danger")
+        self.delete_button.setToolTip(
+            "Delete the files from the disk and take the download out of the list")
         self.delete_button.clicked.connect(self._delete)
-        buttons.addWidget(self.delete_button)
-        layout.addLayout(buttons)
+        footer.addWidget(self.delete_button)
+        layout.addLayout(footer)
 
     def _remove(self) -> None:
         self.delete_files = False

@@ -26,8 +26,8 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QGr
                                QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar,
                                QPushButton, QSizePolicy, QStackedWidget, QStyledItemDelegate,
-                               QStyle, QTableView, QToolButton, QTreeWidget, QTreeWidgetItem,
-                               QVBoxLayout, QWidget)
+                               QStyle, QSystemTrayIcon, QTableView, QToolButton, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout, QWidget)
 
 try:  # package import
     from .. import mediafire_resume as rs
@@ -147,7 +147,7 @@ class DownloadTableView(QTableView):
 class NameDelegate(QStyledItemDelegate):
     """Draws the name cell: the icon, the name and the facts under it."""
 
-    expanded_requested = Signal(QPoint)
+    expanded_requested = Signal(object)      # the model index of the row
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -220,7 +220,7 @@ class StatusDelegate(QStyledItemDelegate):
     """Draws the status cell: the progress bar and the percentage."""
 
     #: the row whose priority was clicked
-    priority_requested = Signal(QPoint)
+    priority_requested = Signal(object)     # the model index of the row
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -546,7 +546,6 @@ class ArkLoadMainWindow(QMainWindow):
             connections=int(settings.get("connections", 1) or 1),
             verify_hashes=bool(settings.get("verify_hashes", True)),
             auto_resume=bool(settings.get("auto_resume", True)),
-            engine_path=str(settings.get("engine_path", "") or ""),
             engine_port=int(settings.get("engine_port", 3128) or 3128),
             per_host=int(settings.get("per_host", 2) or 2),
         )
@@ -1218,18 +1217,12 @@ class ArkLoadMainWindow(QMainWindow):
                 self.engine.start_record(record)
 
     def _warm_up_engine(self) -> None:
-        """Start the JDownloader engine in the background when the queue needs it.
+        """Start the engines in the background, so the window does not wait for them.
 
-        The engine is a JVM: it takes a few seconds to come up, and the window must not wait
-        for it.
+        The JDownloader engine is a JVM: it takes a few seconds to come up, and the window must
+        not wait for it.  aria2 starts when the first link needs it.
         """
-        backend = self.engine.jd_backend()
-        if backend is None:
-            return
-        needs_engine = any(record.backend == "jdownloader"
-                           for record in self.model.records())
-        if needs_engine:
-            backend.start_in_background()
+        self.engine.registry.start_engines()
 
     def _on_job_added(self, job_id: str) -> None:
         record = self.engine.record(job_id)
@@ -1238,6 +1231,13 @@ class ArkLoadMainWindow(QMainWindow):
         self._toggle_table_visibility()
 
     def _on_job_changed(self, job_id: str) -> None:
+        if self.engine.record(job_id) is None:
+            # the download was taken out of the queue while it still reported; the row goes
+            # and nothing must write it back into the list on disk
+            self.model.remove_record(job_id)
+            self._toggle_table_visibility()
+            self._update_details()
+            return
         self.model.update_record(job_id)
         record = self.model.record(job_id)
         if record is not None:
@@ -1259,10 +1259,29 @@ class ArkLoadMainWindow(QMainWindow):
         self.model.update_record(job_id)
         self._on_engine_message(message)
         self._update_status_bar()
+        self._update_details()
         record = self.model.record(job_id)
         if record is not None:
             self.addons.fire("after_download", record)
+            if complete:
+                # a finished download is Completed, whatever the row showed before
+                record.state = TaskState.COMPLETED
+                self.engine.persist(record)
+                self.model.update_record(job_id)
+                if bool(self.settings.get("notify_complete", True)):
+                    self._notify("Download finished",
+                                 f"{record.title} was downloaded and verified")
         self._maybe_exit()
+
+    def _notify(self, title: str, text: str) -> None:
+        """A message over the tray icon; the user can turn it off in the preferences."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        if getattr(self, "_tray", None) is None:
+            self._tray = QSystemTrayIcon(styles.app_icon(
+                styles.palette(self.theme)["accent"]), self)
+        self._tray.show()
+        self._tray.showMessage(title, text, QSystemTrayIcon.Information, 5000)
 
     def _on_job_error(self, job_id: str, message: str) -> None:
         self.model.update_record(job_id)
@@ -1435,20 +1454,28 @@ class ArkLoadMainWindow(QMainWindow):
             self._resume_record(record)
 
     def _delete_selected(self) -> None:
-        """The reference dialog: delete the files or only take them out of the list."""
+        """The Delete key: delete the files or only take them out of the list."""
         selected = self._selected_records()
-        if not selected:
-            return
-        dialog = DeleteDownloadsDialog(self, selected)
+        if selected:
+            self._delete_records(selected)
+
+    def _delete_record(self, record: DownloadRecord) -> None:
+        """The Delete item of the row menu replaces the old Cancel: the transfer stops and
+        the download leaves the list."""
+        self._delete_records([record])
+
+    def _delete_records(self, records: list[DownloadRecord]) -> None:
+        """The reference dialog: delete the files or only take them out of the list."""
+        dialog = DeleteDownloadsDialog(self, records)
         if dialog.exec() != DeleteDownloadsDialog.Accepted:
             return
         deleted = 0
         if dialog.delete_files:
-            for record in selected:
+            for record in records:
                 if record.root and Path(record.root).exists():
                     shutil.rmtree(record.root, ignore_errors=True)
                     deleted += 1
-        for record in selected:
+        for record in records:
             self.engine.remove_from_list(record, delete_files=False)
             self.model.remove_record(record.job_id)
         self._toggle_table_visibility()
@@ -1637,9 +1664,10 @@ class ArkLoadMainWindow(QMainWindow):
         resume_action = menu.addAction("Resume")
         resume_action.setEnabled(paused or stopped or not running)
         resume_action.triggered.connect(lambda: self._resume_record(record))
-        cancel_action = menu.addAction("Cancel")
-        cancel_action.setEnabled(running or paused)
-        cancel_action.triggered.connect(lambda: self._cancel_record(record))
+        delete_action = menu.addAction("Delete")
+        delete_action.setToolTip(
+            "Stop the download and take it out of the list; delete its files when you want")
+        delete_action.triggered.connect(lambda: self._delete_record(record))
         menu.addSeparator()
 
         # -- the list
@@ -1989,21 +2017,22 @@ class ArkLoadMainWindow(QMainWindow):
     def _cancel_record(self, record: DownloadRecord) -> None:
         """Stop a download; the finished files are kept."""
         self.engine.cancel(record)
-        record.status = "cancelled"
         self._update_job_row(record)
         self._on_engine_message(f"{record.title} was cancelled")
 
     def _pause_record(self, record: DownloadRecord) -> None:
         """Pause a running download; the bytes that are already there are kept."""
         self.engine.pause(record)
-        record.status = "paused"
         self._update_job_row(record)
         self._on_engine_message(f"{record.title} was paused")
 
     def _resume_record(self, record: DownloadRecord) -> None:
-        """Continue a paused download, or start it again from the manifest."""
+        """Continue a paused download, or start it again from the manifest.
+
+        The status is not written here: the engine knows whether the download can start
+        really (a scheduled or host limited one keeps waiting in the queue).
+        """
         self.engine.resume(record)
-        record.status = "running"
         self._update_job_row(record)
         self._on_engine_message(f"{record.title} continues")
 
@@ -2312,9 +2341,8 @@ class ArkLoadMainWindow(QMainWindow):
     def _on_settings_changed(self, settings: dict) -> None:
         self.settings.update(settings)
         self._save_settings()
-        if "engine_path" in settings or "engine_port" in settings:
-            # the engine changed: the backend is built again the next time it is needed
-            self.engine.options.engine_path = str(settings.get("engine_path", "") or "")
+        if "engine_port" in settings:
+            # the port of the local API of the engine changed
             self.engine.options.engine_port = int(settings.get("engine_port", 3128) or 3128)
             self.engine.reset_jdownloader()
 
