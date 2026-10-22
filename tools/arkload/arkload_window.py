@@ -25,9 +25,9 @@ from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QKeySequence, Q
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QGridLayout,
                                QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar,
-                               QPushButton, QSizePolicy, QStackedWidget, QStyledItemDelegate,
-                               QStyle, QSystemTrayIcon, QTableView, QToolButton, QTreeWidget,
-                               QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QPushButton, QSizePolicy, QSplitter, QStackedWidget,
+                               QStyledItemDelegate, QStyle, QSystemTrayIcon, QTableView,
+                               QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 try:  # package import
     from .. import mediafire_resume as rs
@@ -770,10 +770,16 @@ class ArkLoadMainWindow(QMainWindow):
         self.status_delegate.colours = dict(styles.palette(self.theme))
         self.status_delegate.priority_requested.connect(self._on_priority_clicked)
         self.table.setItemDelegateForColumn(DownloadTableModel.COLUMN_STATUS, self.status_delegate)
-        area_layout.addWidget(self.table)
-
+        # the list and the dashed area share one splitter: the list keeps the height of its
+        # rows and the dashed area takes the rest - when the list is empty, it takes everything
+        self.area_splitter = QSplitter(Qt.Vertical)
+        self.area_splitter.setChildrenCollapsible(False)
+        self.area_splitter.addWidget(self.table)
         self.drop_zone = DropArea()
-        area_layout.addWidget(self.drop_zone, 1)
+        self.area_splitter.addWidget(self.drop_zone)
+        area_layout.addWidget(self.area_splitter, 1)
+        # a movement of the window or of the handle gives the list the height of its rows again
+        self.area_splitter.splitterMoved.connect(lambda *_args: self._fit_table())
         self.pages.addWidget(area)
 
         # the link grabber of JDownloader 2
@@ -2313,10 +2319,39 @@ class ArkLoadMainWindow(QMainWindow):
         self._on_engine_message(f"{record.title} is starting")
 
     def _toggle_table_visibility(self) -> None:
-        """The list takes the place of the empty state as soon as there is something."""
-        has_records = bool(self.model.records())
-        self.table.setVisible(has_records)
-        self.drop_zone.setVisible(not has_records)
+        """The list shows its rows and the dashed drop zone stays under it in both cases.
+
+        When the list has no visible row the dashed area fills the whole page; when it has
+        rows, the table is only as tall as its rows and the dashed area takes what is left
+        under it - like the reference shows it.
+        """
+        has_rows = self.model.rowCount() > 0
+        self.table.setVisible(has_rows)
+        self.drop_zone.setVisible(True)
+        if not has_rows:
+            # the row-less state takes the whole page again
+            self.area_splitter.setSizes([0, self.area_splitter.height() or 100])
+        # the real heights of the header and the area are only known after the layout ran
+        QTimer.singleShot(0, self._fit_table)
+
+    def _fit_table(self) -> None:
+        """Give the list the height of its rows; the dashed area shares the rest of the page."""
+        rows = self.model.rowCount()
+        if not rows:
+            return
+        row_height = self.table.verticalHeader().defaultSectionSize()
+        header_height = self.table.horizontalHeader().height() or 28
+        # a long list scrolls inside itself: the splitter shrinks both parts, the dashed
+        # area never falls under its minimum height
+        content = header_height + rows * row_height + 4
+        total = self.area_splitter.height() or 0
+        self.area_splitter.setSizes([content, max(150, total - content)])
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        """A new window size gives the list the height of its rows again."""
+        super().resizeEvent(event)
+        if hasattr(self, "area_splitter"):
+            QTimer.singleShot(0, self._fit_table)
 
     def _on_rows_changed(self, *args) -> None:
         self._toggle_table_visibility()

@@ -305,7 +305,7 @@ def test_the_table_appears_when_a_download_is_added(window):
     from tools.arkload.download_model import DownloadRecord
     assert window.table.isHidden() is True
     record = DownloadRecord(job_id="x", url="u", title="libs", destination="d")
-    record.status = dm.COMPLETE
+    record.status = dm.QUEUED          # the downloads tab shows the open ones
     window.model.add_record(record)
     assert window.table.isHidden() is False
 

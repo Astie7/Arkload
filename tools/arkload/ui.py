@@ -124,10 +124,7 @@ class DropArea(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        accent = self.colours.get("accent", "#3D9BFF")
-        text = self.colours.get("text", "#E8ECF1")
         muted = self.colours.get("muted", "#8A929C")
-        faint = self.colours.get("faint", "#5A626C")
 
         pen = QPen(QColor(self.colours.get("border_strong", "#2E353F")))
         pen.setStyle(Qt.DashLine)
@@ -136,36 +133,25 @@ class DropArea(QWidget):
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(self.rect().adjusted(2, 2, -2, -2), 12, 12)
 
+        # one quiet line in the middle: the small arrow and what belongs here
         centre = self.rect().center()
-        # the glyph in a soft circle
-        radius = 21
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(self.colours.get("surface_alt", "#181C22")))
-        painter.drawEllipse(QPointF(centre.x(), centre.y() - 32), radius, radius)
-        painter.setPen(QPen(QColor(accent), 1.8, Qt.SolidLine, Qt.RoundCap))
-        painter.drawLine(QPointF(centre.x(), centre.y() - 43), QPointF(centre.x(), centre.y() - 29))
-        painter.drawPolyline([QPointF(centre.x() - 6, centre.y() - 35),
-                              QPointF(centre.x(), centre.y() - 27),
-                              QPointF(centre.x() + 6, centre.y() - 35)])
-        painter.setPen(QPen(QColor(faint), 1.5, Qt.SolidLine, Qt.RoundCap))
-        painter.drawLine(QPointF(centre.x() - 12, centre.y() - 19),
-                         QPointF(centre.x() + 12, centre.y() - 19))
-
+        title = "Drag-and-drop URL or file"
         font = QFont(self.font())
-        font.setPixelSize(15)
-        font.setWeight(QFont.DemiBold)
+        font.setPixelSize(13)
         painter.setFont(font)
-        painter.setPen(QColor(text))
-        title = "Drag-and-drop a link or a folder key"
-        painter.drawText(QPointF(centre.x() - painter.fontMetrics().horizontalAdvance(title) // 2,
-                                 centre.y() + 14), title)
-        font.setPixelSize(12)
-        font.setWeight(QFont.Normal)
-        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        glyphs = 13
+        gap = 8
+        total = metrics.horizontalAdvance(title) + glyphs + gap
+        left = centre.x() - total // 2
+        painter.setPen(QPen(QColor(muted), 1.6, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(QPointF(left, centre.y() - 5), QPointF(left, centre.y() + 4))
+        painter.drawPolyline([QPointF(left - 4, centre.y() - 1),
+                              QPointF(left, centre.y() + 4),
+                              QPointF(left + 4, centre.y() - 1)])
         painter.setPen(QColor(muted))
-        hint = "Folders, files and the links of any host"
-        painter.drawText(QPointF(centre.x() - painter.fontMetrics().horizontalAdvance(hint) // 2,
-                                 centre.y() + 36), hint)
+        painter.drawText(QPointF(left + glyphs + gap,
+                                 centre.y() + metrics.ascent() // 2), title)
         painter.end()
 
 
