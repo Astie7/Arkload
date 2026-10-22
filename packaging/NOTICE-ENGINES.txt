@@ -1,0 +1,47 @@
+﻿The engines of ArkLoad
+
+====================
+
+ArkLoad ships two engines next to the application.  They are separate programs: ArkLoad starts
+them, drives them and stops them again, but it does not change them.
+
+  JDownloader 2   the engine with the hosters, the link collectors and the plugins
+  aria2           the small, fast downloader for the direct links
+
+Both are driven through their own local interfaces (the local API of JDownloader 2, the JSON-RPC
+interface of aria2).  ArkLoad picks the engine on its own - the user never chooses one.
+
+Where they are
+--------------
+
+The installer puts them into
+
+  %LOCALAPPDATA%\ArkLoad\engines
+
+and the application looks for them there first, then in the folder of the program (a portable
+copy) and then in the source tree (the development build).  A clean Windows system needs nothing
+else: the Java runtime the JDownloader engine needs is part of the package.
+
+The licences
+------------
+
+The engines are not part of ArkLoad, and each of them keeps its own licence.  The notice of
+them is this file; the licence texts of the third party programs are in the folders of the
+engines themselves ("licenses" for JDownloader 2, "COPYING" for aria2, "legal" for the Java
+runtime).
+
+  JDownloader 2
+    The JDownloader sources are licensed under the GNU General Public License, version 3 or
+    later.  The AppWork libraries (AppWorkUtils, MyJDownloaderClient) are licensed under the
+    GNU Affero General Public License, version 3, for a non-commercial use; a commercial use
+    needs a licence from AppWork GmbH.
+
+  aria2
+    Licensed under the Apache License, version 2.0.
+
+  The Java runtime (Eclipse Temurin)
+    Licensed under the GNU General Public License, version 2, with the Classpath Exception.
+
+ArkLoad itself is the program in the folder of the installation; the engines are the programs in
+the "engines" folder of the application data directory.  The engine is the work of
+JDownloader2.org and its contributors; ArkLoad is not affiliated with them.

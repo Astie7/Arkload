@@ -55,7 +55,7 @@ Source: "assets\arkload.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; the engines of ArkLoad: they are put into the data folder, where the program finds them
 Source: "engines\*"; DestDir: "{localappdata}\ArkLoad\engines"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: engines
 ; the notice of the engines (the licences of the third party programs are in the engine folder)
-Source: "engines\NOTICE.txt"; DestDir: "{localappdata}\ArkLoad\engines"; Flags: ignoreversion; Tasks: engines
+Source: "NOTICE-ENGINES.txt"; DestDir: "{localappdata}\ArkLoad\engines"; Flags: ignoreversion; Tasks: engines
 
 [Icons]
 Name: "{group}\{#AppShortName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"

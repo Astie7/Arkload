@@ -99,6 +99,9 @@ if (-not $SkipAria2) {
     }
 }
 
+# the notice of the engines travels with them
+Copy-Item (Join-Path $PSScriptRoot "NOTICE-ENGINES.txt") (Join-Path $Staging "NOTICE.txt") -Force
+
 Info "the result"
 Get-ChildItem $Staging | ForEach-Object {
     $size = if ($_.PSIsContainer) {
