@@ -172,3 +172,28 @@ The result is `JDownloader/standalone/dist/JDownloader.jar`.
 * **aria2** through its JSON-RPC interface.  ArkLoad starts `aria2c` with the RPC interface on a
   local port and a secret that is generated for every run, and talks to it with
   `tools/arkload/engines/aria2.py`.
+
+## The Nuitka build (an alternative to PyInstaller)
+
+ArkLoad can also be built with Nuitka, which compiles the Python modules into native code.  The
+result is a folder build, the same shape as the PyInstaller one, and it is verified to start
+without a Python installation and to download a file through the engine.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_nuitka.ps1
+```
+
+The build needs:
+
+* Python 3.14 with Nuitka installed (`python -m pip install nuitka`),
+* the C compiler of Visual Studio 2022 Community (the script finds it itself through
+  `vcvars64.bat`).
+
+The result is `build\ArkLoad\ArkLoad.exe`.  The engines are not part of the build - they are
+installed by the installer or staged with `packaging\build_engines.ps1`, and the application
+finds them where they are.
+
+### PyInstaller or Nuitka?
+
+Both are supported.  PyInstaller is the one the installer uses; Nuitka is available for the cases
+where the native build matters.  The two produce the same application with the same behaviour.
