@@ -9,7 +9,7 @@
 
 #define AppName "ArkLoad - Modern Download Manager"
 #define AppShortName "ArkLoad"
-#define AppVersion "1.0"
+#define AppVersion "1.1.0"
 #define AppPublisher "Astie7"
 #define AppURL "https://github.com/Astie7/Arkload"
 #define AppExeName "ArkLoad.exe"

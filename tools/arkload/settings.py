@@ -15,7 +15,7 @@ from pathlib import Path
 #: the name of the application (also the name of the data folder)
 APP_ID = "ArkLoad"
 APP_NAME = "ArkLoad"
-APP_VERSION = "1.0"
+APP_VERSION = "1.1.0"
 
 SETTINGS_PATH = Path.home() / ".mediafire-dl-gui.json"
 LOG_PATH = Path.home() / ".mediafire-dl-gui.log"

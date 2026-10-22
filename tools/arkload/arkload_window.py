@@ -57,7 +57,7 @@ from .settings import default_destination, load_settings, save_settings
 
 APP_NAME = "ArkLoad"
 APP_SHORT_NAME = "ArkLoad"
-VERSION = "1.0"
+VERSION = "1.1.0"
 
 #: the tabs of the interface, the way JDownloader 2 shows them
 TABS = ("Downloads", "LinkGrabber", "History")
