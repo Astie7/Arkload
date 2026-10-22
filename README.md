@@ -15,6 +15,7 @@ ArkLoad is a normal Windows application that installs through a setup program, s
 - **Accepts MediaFire folder keys**: supports bare folder keys as well as full links.
 - **Persists download information**: retains the download list, tags, priorities, and supported metadata across restarts.
 - **Supports multiple hosting services**: handles MediaFire and other supported hosting services, alongside direct downloads.
+- **Bundles its download engines**: JDownloader 2 (with the Java runtime it needs) and aria2 are installed with the application and managed automatically; ArkLoad picks the engine for every link on its own and never runs a download twice.
 - **Provides a unified experience**: download management, progress reporting, and controls remain consistent throughout the application.
 
 ## The interface
