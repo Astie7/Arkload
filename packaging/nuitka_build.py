@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+import time
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "packaging" / "assets"
@@ -64,8 +65,20 @@ def main() -> int:
     final = OUTPUT_DIR / "ArkLoad"
     if produced.is_dir():
         if final.exists():
-            shutil.rmtree(final)
-        produced.rename(final)
+            # the folder may be locked by a process that is still finishing - retry
+            for _ in range(10):
+                try:
+                    shutil.rmtree(final)
+                    break
+                except OSError:
+                    time.sleep(1)
+            else:
+                # give it a name that does not collide and keep going
+                final = OUTPUT_DIR / ("ArkLoad-" + str(int(time.time())))
+        try:
+            produced.rename(final)
+        except OSError:
+            final = produced
         print("the build is in", final)
     return 0
 
