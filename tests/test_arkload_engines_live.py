@@ -78,7 +78,7 @@ def test_the_bundled_aria2_downloads_a_file(tmp_path):
     """The bundled aria2 starts, takes the link and reports the progress."""
     payload = b"aria2 live payload " * 150_000
     server = Server(tmp_path / "www", "payload.bin", payload)
-    engine = Aria2Engine(port=6800)
+    engine = Aria2Engine(port=6871)
     try:
         engine.start()
         assert engine.available()
@@ -104,7 +104,7 @@ def test_the_bundled_aria2_can_pause_and_resume(tmp_path):
     """The controls of the window reach aria2."""
     payload = b"aria2 pause payload " * 400_000          # about 8 MB
     server = Server(tmp_path / "www", "payload.bin", payload, slow=True)
-    engine = Aria2Engine(port=6800)
+    engine = Aria2Engine(port=6872)
     try:
         engine.start()
         handle = engine.add(DownloadRequest(url=server.url, destination=str(tmp_path / "out"),
@@ -159,7 +159,7 @@ def test_the_registry_runs_a_direct_link_with_aria2(tmp_path):
     payload = b"registry live payload " * 100_000
     server = Server(tmp_path / "www", "payload.bin", payload)
     registry = EngineRegistry(jdownloader=JDownloaderEngine(port=3128),
-                              aria2=Aria2Engine(port=6800))
+                              aria2=Aria2Engine(port=6873))
     try:
         handle, engine = registry.add(server.url, str(tmp_path / "out"), "payload.bin")
         assert registry.key_of(engine) == "aria2"
@@ -184,7 +184,7 @@ def test_a_link_that_is_gone_is_not_downloaded_twice(tmp_path):
     """
     server = Server(tmp_path / "www", "payload.bin", b"x")
     registry = EngineRegistry(jdownloader=JDownloaderEngine(port=3128),
-                              aria2=Aria2Engine(port=6800))
+                              aria2=Aria2Engine(port=6874))
     try:
         handle, engine = registry.add(f"http://127.0.0.1:{server.port}/not-there.bin",
                                       str(tmp_path / "out"), "not-there")
