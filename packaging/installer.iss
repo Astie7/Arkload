@@ -47,6 +47,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+; the engines are a task of their own - a task is checked by default, so the engines
+; are installed with ArkLoad (the user can untick them)
 Name: "engines"; Description: "Install the download engines (JDownloader 2 and aria2)"; GroupDescription: "The engines of ArkLoad:"
 
 [Files]
