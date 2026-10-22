@@ -19,6 +19,8 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Push-Location $Root
 
+function Step($text) { Write-Host ""; Write-Host "== $text" -ForegroundColor Cyan }
+
 try {
     if ($Clean) {
         Remove-Item build -Recurse -Force -ErrorAction SilentlyContinue
@@ -26,7 +28,6 @@ try {
     & $Python "packaging\nuitka_build.py"
     if ($LASTEXITCODE -ne 0) { throw "the Nuitka build failed" }
 
-    Step = { param($text) Write-Host ""; Write-Host "== $text" -ForegroundColor Cyan }
     Step "the result"
     Get-ChildItem "build\ArkLoad" | Select-Object Name, @{n = "MB"; e = { if ($_.PSIsContainer) { "" } else { [math]::Round($_.Length / 1MB, 1) } } } | Format-Table -AutoSize
 } finally {

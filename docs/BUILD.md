@@ -108,7 +108,7 @@ ArkLoad.exe --settings <file>           use another settings file
 The binaries are not code signed, so Windows SmartScreen warns on the first start. A release that
 has to avoid that needs a certificate and a `signtool` step in `packaging\build.ps1`.
 
-## ## The engines of ArkLoad
+## The engines of ArkLoad
 
 ArkLoad ships two engines next to the application: the **JDownloader 2** engine (with the Java
 runtime it needs) and **aria2**.  They are not part of the repository - they are 260 MB of
