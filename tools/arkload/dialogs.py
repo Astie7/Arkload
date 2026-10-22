@@ -529,7 +529,7 @@ class DeleteDownloadsDialog(QDialog):
         choice_hint = QLabel(
             f"<b>Remove from list</b> only takes the download{plural} out of the list — "
             f"the file{plural} stay{stays} on the disk. <b>Delete files</b> removes "
-            ("it" if count == 1 else "them") + " from the disk as well.")
+            + ("it" if count == 1 else "them") + " from the disk as well.")
         choice_hint.setWordWrap(True)
         layout.addWidget(choice_hint)
 
