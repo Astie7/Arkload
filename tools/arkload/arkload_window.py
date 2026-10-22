@@ -1018,8 +1018,8 @@ class ArkLoadMainWindow(QMainWindow):
         bar.setObjectName("StatusBar")
         self.status = bar
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(14, 6, 14, 6)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 5, 12, 5)
+        layout.setSpacing(8)
 
         # -- the limiter: a flat control that opens the presets
         self.limiter_button = QToolButton()
@@ -1027,7 +1027,6 @@ class ArkLoadMainWindow(QMainWindow):
         self.limiter_button.setIcon(styles.make_icon("snail",
                                                      styles.palette(self.theme)["muted"]))
         self.limiter_button.setToolTip("The speed limit of the transfers")
-        self.limiter_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.limiter_button.setPopupMode(QToolButton.InstantPopup)
         self.limiter_button.setObjectName("Limiter")
         self.limiter_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
@@ -1050,25 +1049,29 @@ class ArkLoadMainWindow(QMainWindow):
 
         self.gear_button = QToolButton()
         self.gear_button.setIcon(styles.make_icon("gear", styles.palette(self.theme)["muted"]))
-        self.gear_button.setFixedSize(28, 28)
+        self.gear_button.setFixedSize(26, 26)
         self.gear_button.setToolTip("Preferences")
         self.gear_button.clicked.connect(self._show_preferences)
         layout.addWidget(self.gear_button)
 
         layout.addWidget(self._bar_separator())
 
-        # -- the live speeds
-        self.down_speed_label = QLabel("0 B/s")
-        self.up_speed_label = QLabel("0 B/s")
-        self.down_speed_label.setObjectName("Speed.TLabel")
-        self.up_speed_label.setObjectName("Speed.TLabel")
+        # -- the live speeds: down in one colour, up in another, and both amber in snail mode
+        colours = styles.palette(self.theme)
+        self.down_speed_label = QLabel("▼ 0 B/s")
+        self.up_speed_label = QLabel("▲ 0 B/s")
         self.down_speed_label.setToolTip("The speed of all the downloads together")
         self.up_speed_label.setToolTip("The upload speed")
+        self.down_speed_label.setStyleSheet(f"color: {colours['accent']};")
+        self.up_speed_label.setStyleSheet(f"color: {colours['muted']};")
         layout.addWidget(self.down_speed_label)
+        layout.addSpacing(6)
         layout.addWidget(self.up_speed_label)
 
         self.message_label = QLabel("")
         self.message_label.setObjectName("Faint")
+        self.message_label.setAlignment(Qt.AlignVCenter)
+        layout.addSpacing(6)
         layout.addWidget(self.message_label)
 
         layout.addStretch(1)
@@ -1076,6 +1079,8 @@ class ArkLoadMainWindow(QMainWindow):
         # -- the download that is selected
         self.selected_label = QLabel("")
         self.selected_label.setObjectName("Muted")
+        self.selected_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.selected_label.setMaximumWidth(300)
         layout.addWidget(self.selected_label)
 
         self.details_button = QToolButton()
@@ -1294,10 +1299,12 @@ class ArkLoadMainWindow(QMainWindow):
         self.down_speed_label.setText(f"▼ {fmt_speed(down)}")
         self.up_speed_label.setText(f"▲ {fmt_speed(up)}")
         colours = styles.palette(self.theme)
-        colours = styles.palette(self.theme)
-        colour = (colours["warning"] if (self.engine.options.slow_mode
-                    or self.engine.options.rate_limit) else colours["success"])
-        self.up_speed_label.setStyleSheet(f"color: {colour};")
+        # in snail mode the whole bar turns amber, otherwise down and up keep their colours
+        slow = self.engine.options.slow_mode or bool(self.engine.options.rate_limit)
+        self.down_speed_label.setStyleSheet(
+            f"color: {colours['warning'] if slow else colours['accent']};")
+        self.up_speed_label.setStyleSheet(
+            f"color: {colours['warning'] if slow else colours['muted']};")
         self._update_status_bar()
         if self._shutdown_armed and active == 0 and self._shutdown_jobs:
             still_running = [job_id for job_id in self._shutdown_jobs
@@ -1373,7 +1380,6 @@ class ArkLoadMainWindow(QMainWindow):
         self._apply_snail_mode()
         priority = self._priority_of_selection()
         self.priority_button.setText(priority)
-        colours = styles.palette(self.theme)
         colours = styles.palette(self.theme)
         colour = {"HIGH": colours["success"], "MEDIUM": colours["warning"], "LOW": colours["danger"]}.get(priority, colours["success"])
         self.priority_button.setStyleSheet(f"color: {colour}; border-color: {colour};")
@@ -1982,7 +1988,10 @@ class ArkLoadMainWindow(QMainWindow):
         record = selected[0] if selected else (self.model.records()[0]
                                                if self.model.records() else None)
         name = record.title if record is not None else ""
-        self.selected_label.setText(name)
+        # a long name is cut in the middle, so the bar never grows and never shifts
+        metrics = self.selected_label.fontMetrics()
+        self.selected_label.setText(metrics.elidedText(name, Qt.ElideMiddle, 280) if name else "")
+        self.selected_label.setToolTip(name)
         colours = styles.palette(self.theme)
         self.details_button.setIcon(styles.make_icon(
             "chevron_up" if self.details.isVisible() else "chevron", colours["muted"]))
