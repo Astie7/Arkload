@@ -128,8 +128,9 @@ def test_model_exposes_the_record_in_the_user_role(qt_app):
 
 def test_stylesheet_contains_the_reference_colours():
     sheet = styles.stylesheet("dark")
-    for colour in ("#141415", "#1A1A1B", "#222225", "#333336", "#4CD3FF", "#E4E4E7",
-                   "#8E8E93", "#22C55E", "#15803D", "#252528", "#3A3A3D"):
+    for colour in ("#0C0E11", "#12151A", "#181C22", "#1F242B", "#232932", "#2E353F",
+                   "#3D9BFF", "#E8ECF1", "#8A929C", "#3DD68C", "#171B21",
+                   "#1A1F26", "#5AAEFF", "#12283D", "#15293A"):
         assert colour in sheet
 
 
@@ -169,7 +170,7 @@ def window(qt_app, tmp_path, monkeypatch):
 
 def test_window_builds_with_the_expected_widgets(window):
     assert window.windowTitle() == "ArkLoad"
-    assert window.add_button.text() == "+ Add download"
+    assert window.add_button.text() == "Add download"
     assert window.search_edit.placeholderText() == "Search in downloads..."
     assert window.table.model() is window.model
     assert window.stack.count() == 2
@@ -178,13 +179,14 @@ def test_window_builds_with_the_expected_widgets(window):
 def test_preferences_navigation(window):
     window._show_preferences()
     assert window.stack.currentIndex() == 1
-    assert window.preferences.sidebar.count() == 7
+    assert window.preferences.sidebar.count() == 6
     names = [window.preferences.sidebar.item(i).text()
              for i in range(window.preferences.sidebar.count())]
     assert names == ["General", "Download Engine", "Browser Integration", "Network",
-                     "Traffic Limits", "BitTorrent", "Advanced"]
+                     "Traffic Limits", "Advanced"]
     assert "Antivirus" not in names
     assert "Remote Access" not in names
+    assert "BitTorrent" not in names
     window.preferences.sidebar.setCurrentRow(4)
     assert window.preferences.stack.currentIndex() == 4
     window._show_dashboard()
@@ -195,7 +197,7 @@ def test_theme_switch_changes_the_stylesheet(window, qt_app):
     window._apply_theme("light")
     assert "#FFFFFF" in qt_app.styleSheet()
     window._apply_theme("dark")
-    assert "#141415" in qt_app.styleSheet()
+    assert "#0C0E11" in qt_app.styleSheet()
 
 
 def test_the_download_table_is_part_of_the_window(window, qt_app):
@@ -213,6 +215,41 @@ def test_the_download_table_is_part_of_the_window(window, qt_app):
     assert window.table.parentWidget().isVisible()
 
 
+def test_the_tabs_replace_the_sidebar(window):
+    """The interface has the tabs of the reference, not a list of categories."""
+    from tools.arkload.arkload_window import TABS
+    assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == list(TABS)
+    assert not hasattr(window, "sidebar_list")
+
+
+def test_the_tabs_show_the_right_downloads(window):
+    """Downloads holds the open ones, the history the finished ones."""
+    from tools.arkload.download_model import DownloadRecord
+    running = DownloadRecord(job_id="a", url="u", title="running.zip", destination="d")
+    running.status = dm.RUNNING
+    done = DownloadRecord(job_id="b", url="u", title="done.zip", destination="d")
+    done.status = dm.COMPLETE
+    window.model.add_record(running)
+    window.model.add_record(done)
+
+    window.tabs.setCurrentIndex(0)          # Downloads
+    assert [record.title for record in window.model.visible_records()] == ["running.zip"]
+    window.tabs.setCurrentIndex(2)          # History
+    assert [record.title for record in window.model.visible_records()] == ["done.zip"]
+
+
+def test_the_link_grabber_shows_the_links_that_wait(window):
+    """The link grabber holds the links of the queue that wait for their turn."""
+    from tools.arkload.download_model import DownloadRecord
+    queued = DownloadRecord(job_id="a", url="u", title="waiting.zip", destination="d")
+    queued.status = dm.QUEUED
+    window.model.add_record(queued)
+    window.tabs.setCurrentIndex(1)          # LinkGrabber
+    rows = window.grabber_model.rows()
+    assert [row["name"] for row in rows] == ["waiting.zip"]
+    assert rows[0]["state"] == "Queued"
+
+
 def test_add_download_dialog_validates_the_url(window, tmp_path, monkeypatch):
     from tools.arkload import dialogs
     monkeypatch.setattr(dialogs.QMessageBox, "warning", lambda *args, **kwargs: None)
@@ -221,7 +258,7 @@ def test_add_download_dialog_validates_the_url(window, tmp_path, monkeypatch):
     dialog._accept()
     assert dialog.accepted is None               # rejected, the dialog stays open
     dialog.url_edit.setText("https://www.mediafire.com/folder/abc")
-    dialog.destination_combo.setCurrentText(str(tmp_path))
+    dialog.destination = str(tmp_path)
     dialog._accept()
     assert dialog.accepted is not None
     assert dialog.accepted["url"] == "https://www.mediafire.com/folder/abc"
@@ -231,10 +268,9 @@ def test_add_download_dialog_takes_any_link(window, tmp_path, monkeypatch):
     """A link of another host is accepted as well - the JDownloader engine runs it."""
     from tools.arkload import dialogs
     monkeypatch.setattr(dialogs.QMessageBox, "warning", lambda *args, **kwargs: None)
-    dialog = dialogs.AddDownloadDialog(window, str(tmp_path),
-                                       resolver=lambda url: "jdownloader")
+    dialog = dialogs.AddDownloadDialog(window, str(tmp_path), resolver=lambda url: "jdownloader")
     dialog.url_edit.setText("https://example.com/files/pack.zip")
-    dialog.destination_combo.setCurrentText(str(tmp_path))
+    dialog.destination = str(tmp_path)
     dialog._accept()
     assert dialog.accepted is not None
     assert dialog.accepted["url"] == "https://example.com/files/pack.zip"
@@ -256,6 +292,7 @@ def test_search_filters_the_table(window):
     record = DownloadRecord(job_id="x", url="u", title="texture-pack.zip", destination="d")
     record.status = dm.COMPLETE
     window.model.add_record(record)
+    window.tabs.setCurrentIndex(2)          # the history holds the finished downloads
     window._on_search("texture")
     assert window.model.rowCount() == 1
     window._on_search("nothing")
@@ -274,13 +311,55 @@ def test_the_table_appears_when_a_download_is_added(window):
 
 
 def test_the_toolbar_offers_the_reference_choices(window):
-    assert [window.sort_combo.itemText(i) for i in range(window.sort_combo.count())] == [
+    """The sort, the filter and the selection are the pills of the navigation bar."""
+    assert [action.text() for action in window.sort_button.menu().actions()] == [
         "Newest", "Old", "A-Z", "Z-A", "By size: large", "By size: small",
         "By status: ascending", "By status: descending"]
-    assert [window.filter_combo.itemText(i) for i in range(window.filter_combo.count())] == [
-        "All files", "Missing Files", "Active", "Completed", "MediaFire folders", "Video", "Music"]
-    assert [action.text() for action in window.selection_menu.actions()] == [
+    assert [action.text() for action in window.filter_button.menu().actions()] == [
+        "All files", "Missing Files", "Active", "Completed", "MediaFire folders", "Video",
+        "Music"]
+    assert [action.text() for action in window.selection_button.menu().actions()] == [
         "All", "Downloads only", "Uploads only", "Completed", "Stopped"]
+    assert window.sort_button.text() == "Newest"
+    assert window.filter_button.text() == "All files"
+
+
+def test_the_window_has_the_menu_bar_of_the_reference(window):
+    """The commands that do not fit into the bars are in the menu bar."""
+    titles = [action.text() for action in window.menuBar().actions()]
+    assert titles == ["&File", "&Downloads", "&Settings", "&Tools", "&Help"]
+
+
+def test_the_context_menu_belongs_to_the_row_under_the_cursor(window, qt_app):
+    """The right click opens the menu of the download the user pointed at."""
+    from tools.arkload.download_model import DownloadRecord
+    from PySide6.QtCore import QPoint
+    first = DownloadRecord(job_id="a", url="u", title="first.zip", destination="d")
+    second = DownloadRecord(job_id="b", url="u", title="second.zip", destination="d")
+    window.model.add_record(first)
+    window.model.add_record(second)
+    window.show()
+    qt_app.processEvents()
+
+    shown = []
+    window._show_row_menu = lambda position, record=None: shown.append(record)
+    # the cursor is over the row of the second download (the list is sorted)
+    row = [record.title for record in window.model.visible_records()].index("second.zip")
+    window.table.indexAt = lambda position: window.model.index(row, 0)
+
+    window._on_context_menu(QPoint(10, 10))
+    assert shown and shown[0].title == "second.zip"
+    # the row under the cursor is the current one
+    assert window.table.currentIndex().row() == row
+
+
+def test_the_command_bar_has_the_buttons_of_the_reference(window):
+    """The bar at the top works on the downloads."""
+    for button in (window.start_all_button, window.pause_all_button, window.stop_all_button,
+                   window.add_links_button):
+        assert button.toolTip()
+    assert window.add_button.text() == "Add download"
+    assert window.search_edit.placeholderText() == "Search in downloads..."
 
 
 def test_the_main_menu_has_the_reference_entries(window):
@@ -328,27 +407,19 @@ def test_the_row_menu_has_the_reference_entries(window, tmp_path):
     labels = [action.text() for action in menu.actions()]
     for expected in ("Pause", "Resume", "Cancel", "Open", "Show in folder", "Set priority",
                      "Rename file", "Move to...", "Delete file", "Remove from list", "Add mirror",
-                     "Open download page", "Copy link", "Check for update",
-                     "Export selected downloads", "File integrity", "Schedule", "Change URL",
-                     "Convert to mp3", "Convert to mp4", "Perform virus check", "Add tag"):
+                     "Open download page", "Copy link", "Check for update", "File integrity",
+                     "Schedule", "Change URL"):
         assert expected in labels
+    # the four actions that are not in the menu of a download any more
+    for gone in ("Convert to mp3", "Convert to mp4", "Export selected downloads", "Add tag"):
+        assert gone not in labels
     # the order of the reference
     order = [label for label in labels if label in ("Open", "Show in folder", "Set priority",
                                                      "Rename file", "Move to...", "Delete file",
                                                      "Remove from list", "Copy link",
-                                                     "Change URL", "Perform virus check",
-                                                     "Add tag")]
+                                                     "Change URL")]
     assert order.index("Open") < order.index("Show in folder") < order.index("Set priority")
     assert order.index("Delete file") < order.index("Remove from list")
-    disabled = {action.text() for action in menu.actions() if not action.isEnabled()}
-    # the actions that need files on disk are off for a download without files
-    assert "Open" in disabled
-    assert "Delete file" in disabled
-    # there is no virus scanner in this build, the action says so
-    assert "Perform virus check" in disabled
-    # the rest works
-    assert "Add mirror" not in disabled
-    assert "Convert to mp3" not in disabled
 
 
 def test_the_speed_limiter_sets_a_real_rate(window):
@@ -564,35 +635,73 @@ def test_the_row_menu_offers_the_download_controls(window):
     assert labels["Resume"].isEnabled() is True
 
 
+
 def test_the_new_download_dialog_has_the_reference_fields(window, tmp_path):
     from tools.arkload.dialogs import AddDownloadDialog
     dialog = AddDownloadDialog(window, str(tmp_path))
-    assert dialog.windowTitle() == "New download"
+    assert dialog.windowTitle() == "Add download"
     assert dialog.url_edit.placeholderText()
-    assert dialog.destination_combo.currentText() == str(tmp_path)
-    assert dialog.name_edit.placeholderText()
-    assert dialog.schedule_check.text() == "Scheduler"
-    assert dialog.ok_button.text() == "DOWNLOAD"
+    # the reference shows one row: the link and a browse button
+    assert dialog.ok_button.text() == "OK"
+    assert dialog.ok_button.isEnabled() is False
+    dialog.url_edit.setText("https://www.mediafire.com/folder/abc")
+    assert dialog.ok_button.isEnabled() is True
+    dialog.destination = str(tmp_path)
+    dialog._accept()
+    assert dialog.accepted is not None
+    assert dialog.accepted["url"] == "https://www.mediafire.com/folder/abc"
+
 
 # --------------------------------------------------------------------------- selection mode
 
-def test_the_toolbar_shows_the_selection_actions(window):
+def test_deleting_a_download_removes_the_files_and_the_row(window, tmp_path, monkeypatch):
+    """The dialog of the deletion: the files go and the download leaves the list."""
+    from tools.arkload import dialogs
+    from tools.arkload.download_model import DownloadRecord
+
+    folder = tmp_path / "downloads" / "pack"
+    folder.mkdir(parents=True)
+    (folder / "file.bin").write_bytes(b"data")
+
+    record = DownloadRecord(job_id="x", url="u", title="pack", destination=str(tmp_path))
+    record.root = str(folder)
+    window.model.add_record(record)
+    window.table.selectRow(0)
+
+    class Answer:
+        Accepted = 1
+        delete_files = True
+
+    monkeypatch.setattr(dialogs.DeleteDownloadsDialog, "exec", lambda self: Answer.Accepted)
+    monkeypatch.setattr(dialogs.DeleteDownloadsDialog, "__init__",
+                        lambda self, parent, records: setattr(self, "delete_files", True))
+    window._delete_selected()
+
+    assert not folder.exists()                  # the files are gone
+    assert window.model.record("x") is None     # and the download left the list
+
+
+def test_the_navigation_row_only_holds_the_tabs(window):
+    """The row below the command bar is the navigation of the reference."""
+    assert window.tabs.count() == 3
+    assert [window.tabs.tabText(index) for index in range(3)] == [
+        "Downloads", "LinkGrabber", "History"]
+    # the pills of the sort, the filter and the selection are in the command bar
+    assert window.sort_button.parentWidget() is window.toolbar
+    assert window.filter_button.parentWidget() is window.toolbar
+    assert window.selection_button.parentWidget() is window.toolbar
+
+
+def test_the_details_follow_the_selection(window):
+    """The card at the bottom shows the download that is selected."""
     from tools.arkload.download_model import DownloadRecord
     record = DownloadRecord(job_id="x", url="u", title="libs", destination="d")
-    record.status = dm.COMPLETE
-    record.bytes_total = 1024
     window.model.add_record(record)
     window.table.selectRow(0)
     window._update_selection_mode()
-    assert window.selection_bar.isVisible() is False or True   # the window is hidden in the test
-    assert "1 selected" in window.selected_label_toolbar.text()
-    assert "1.0 KB" in window.selected_label_toolbar.text()
-
-
-def test_the_selection_label_is_empty_without_a_selection(window):
+    assert window.selected_label.text() == "libs"
     window.table.clearSelection()
     window._update_selection_mode()
-    assert window.selected_label_toolbar.text() == ""
 
 
 def test_the_delete_dialog_offers_both_choices(window, tmp_path):

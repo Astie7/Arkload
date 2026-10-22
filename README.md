@@ -37,11 +37,37 @@ and stops it again when ArkLoad closes.
 
 ## The interface
 
-The toolbar holds the selection, the sort and the filter, the **+ Add download** button, the
-search field and the main menu.  Below it is the list of downloads; at the bottom the status bar
-shows the speed limiter, the live speeds, the traffic priority and the selected download.  The
-card at the bottom opens with the arrow in the status bar and shows the progress, the speeds, the
-path and the links of the selected download.
+The window follows the two references it is built on: the frame of **Free Download Manager** and
+the download management of **JDownloader 2**.  It has three rows at the top and one at the
+bottom.
+
+* **The menu bar** (JDownloader 2) holds the commands that do not fit into the bars:
+  *File*, *Downloads*, *Settings*, *Tools* and *Help*.  The *Settings* menu carries the
+  preferences, the shutdown and the download settings of the reference: *Max. chunks per
+  download*, *Max. simultaneous downloads*, *Max. simultaneous downloads per hoster* and the
+  *Speed limit*.
+* **The command bar** holds the buttons that work on the downloads - start, pause, stop and add -
+  on the left; on the right are the **+ Add download** button, the search field and the menu.
+* **The navigation bar** holds the tabs of JDownloader 2 - **Downloads** (what still has work
+  left), **LinkGrabber** (the links that wait for their turn, with an input to paste new ones)
+  and **History** (what is finished) - and, on the right, the pills of Free Download Manager:
+  the sort, the filter, the selection and a quiet line with the numbers of the list.  While a
+  download is selected, the checkbox gives way to the actions of the selection.
+* **The list** has the columns of the references - `#`, name, size, status with the progress
+  bar, the two speeds, the time that is left and the date - and every row carries the facts of
+  the download under its name.  A right click opens the menu of the download under the cursor,
+  the way the file manager does it.
+* **The details card** opens with the arrow in the bottom bar: the name, the path, the progress
+  and the facts of the download on the left, the files it consists of on the right.
+* **The overview** under the list is the "Download Overview" of JDownloader 2: the packages, the
+  total speed, the bytes that are loaded, the time that is left, the open connections and the
+  downloads that are running.
+* **The bar at the bottom** shows the speed limiter, the settings, the live speeds and the
+  download that is selected.
+* **The menu of a download** is grouped - the file, the transfer, the list and the link - and
+  every action knows when it can be used.  A right click opens the menu of the download under
+  the cursor, the way the file manager does it, and the *Delete* key takes the download out of
+  the list (with the choice between deleting the files and only removing the entry).
 
 ## Install
 

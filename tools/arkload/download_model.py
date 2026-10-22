@@ -136,9 +136,9 @@ DownloadRecord = Task
 class DownloadTableModel(QAbstractTableModel):
     """A flat table of downloads, with the sort and filter modes of the reference toolbar."""
 
-    COLUMNS = ("#", "Name", "Size", "Status", "Download", "Upload", "Added", "")
+    COLUMNS = ("#", "Name", "Size", "Status", "Speed \u2193", "Speed \u2191", "ETA", "Added", "")
     COLUMN_INDEX, COLUMN_NAME, COLUMN_SIZE, COLUMN_STATUS = 0, 1, 2, 3
-    COLUMN_DOWN, COLUMN_UP, COLUMN_ADDED, COLUMN_ACTIONS = 4, 5, 6, 7
+    COLUMN_DOWN, COLUMN_UP, COLUMN_ETA, COLUMN_ADDED, COLUMN_ACTIONS = 4, 5, 6, 7, 8
 
     #: the data the status delegate needs to draw the progress bar
     STATUS_ROLE = Qt.UserRole + 1
@@ -189,13 +189,19 @@ class DownloadTableModel(QAbstractTableModel):
                 return fmt_speed(record.speed_down)
             if column == self.COLUMN_UP:
                 return fmt_speed(record.speed_up)
+            if column == self.COLUMN_ETA:
+                # the column of JDownloader 2: the time the download still needs
+                return remaining_time(record).replace("Remaining: ", "")
             if column == self.COLUMN_ADDED:
-                remaining = remaining_time(record)
-                return remaining if remaining else fmt_added(record.added)
+                return fmt_added(record.added)
             return ""
+        if role == Qt.ForegroundRole and column == self.COLUMN_SIZE:
+            # the size is the link of the reference
+            from PySide6.QtGui import QColor
+            return QColor("#3FC1F0")
         if role == Qt.TextAlignmentRole:
             if column in (self.COLUMN_INDEX, self.COLUMN_SIZE, self.COLUMN_DOWN,
-                          self.COLUMN_UP):
+                          self.COLUMN_UP, self.COLUMN_ETA):
                 return int(Qt.AlignRight | Qt.AlignVCenter)
             if column == self.COLUMN_STATUS:
                 return int(Qt.AlignLeft | Qt.AlignVCenter)
@@ -210,15 +216,25 @@ class DownloadTableModel(QAbstractTableModel):
             return record.job_id
         if role == self.EXPANDER_ROLE and column == self.COLUMN_NAME:
             return bool(record.files)
-        if role == self.STATUS_ROLE and column == self.COLUMN_STATUS:
+        if role == self.STATUS_ROLE and column in (self.COLUMN_STATUS, self.COLUMN_NAME):
+            done = record.bytes_done or 0
+            size = record.bytes_total or 0
+            parts = []
+            if size:
+                parts.append(f"{fmt_size(done)} of {fmt_size(size)}")
+            if record.total_files > 1:
+                parts.append(f"{record.verified_files}/{record.total_files} files")
             return {
                 "percent": record.percent,
                 "text": record.status_text(),
+                "subtitle": " · ".join(parts),
                 "priority": record.priority,
                 "active": record.active,
-                "done": record.bytes_done,
-                "size": record.bytes_total,
+                "done": done,
+                "size": size,
                 "failed": record.status in ("failed", "incomplete"),
+                "complete": record.status == COMPLETE,
+                "paused": record.status in ("paused", "cancelled"),
             }
         return None
 
@@ -354,6 +370,63 @@ class DownloadTableModel(QAbstractTableModel):
     def set_sort(self, mode: str) -> None:
         self.sort_mode = mode
         self.refresh()
+
+
+class LinkGrabberModel(QAbstractTableModel):
+    """The links that were collected but are not started yet.
+
+    It is the link grabber of the reference interface: the links that wait in the queue of the
+    engine and the links ArkLoad has collected for a host it does not know itself.
+    """
+
+    COLUMNS = ("Name", "Size", "State")
+
+    def __init__(self, parent: QObject | None = None):
+        super().__init__(parent)
+        self._rows: list[dict] = []
+
+    # -- data -----------------------------------------------------------------
+    def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802 (Qt naming)
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent=QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self.COLUMNS)
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):  # noqa: N802
+        if role != Qt.DisplayRole:
+            return None
+        if orientation == Qt.Horizontal:
+            return self.COLUMNS[section]
+        return section + 1
+
+    def data(self, index: QModelIndex, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        row = self._rows[index.row()]
+        column = index.column()
+        if role == Qt.DisplayRole:
+            if column == 0:
+                return row.get("name", "")
+            if column == 1:
+                return fmt_size(row.get("size") or None)
+            if column == 2:
+                return row.get("state", "")
+            return ""
+        if role == Qt.TextAlignmentRole and column == 1:
+            return int(Qt.AlignRight | Qt.AlignVCenter)
+        if role == Qt.ToolTipRole:
+            return row.get("name", "")
+        return None
+
+    # -- content --------------------------------------------------------------
+    def set_rows(self, rows: list[dict]) -> None:
+        """Show a new list of collected links."""
+        self.beginResetModel()
+        self._rows = list(rows)
+        self.endResetModel()
+
+    def rows(self) -> list[dict]:
+        return list(self._rows)
 
 
 def records_from_manifests(manifests: Iterable[rs.Job]) -> list[DownloadRecord]:

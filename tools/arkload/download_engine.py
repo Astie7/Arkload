@@ -89,6 +89,7 @@ class EngineOptions:
     auto_resume: bool = True
     engine_path: str = ""          # the JDownloader engine (the jar or its folder)
     engine_port: int = 3128        # the local API of the JDownloader engine
+    per_host: int = 2              # the downloads that may run at the same time per host
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -317,8 +318,34 @@ class DownloadEngine(QObject):
             record.state = TaskState.QUEUED
         self.job_changed.emit(record.job_id)
 
+    @staticmethod
+    def _host_of(url: str) -> str:
+        """The host a link belongs to - the limit per hoster counts by it."""
+        from urllib.parse import urlparse
+        return (urlparse(url).netloc or url or "").lower()
+
+    def _host_busy(self, url: str, ignore: str = "") -> int:
+        """How many downloads of the same host are running right now."""
+        host = self._host_of(url)
+        count = 0
+        for job_id, session in self._sessions.items():
+            if job_id == ignore or not session.is_alive():
+                continue
+            other = self._records.get(job_id)
+            if other is not None and self._host_of(other.url) == host:
+                count += 1
+        return count
+
     def _start(self, record: DownloadRecord, options: EngineOptions,
                mode: str = "download") -> None:
+        # a host may not be asked for more downloads than the limit allows
+        limit = max(1, int(options.per_host or 1))
+        if mode != "verify" and self._host_busy(record.url, ignore=record.job_id) >= limit:
+            record.state = TaskState.QUEUED
+            self.persist(record)
+            self.job_changed.emit(record.job_id)
+            return
+
         spec = {
             "job_id": record.job_id,
             "url": record.url,
@@ -342,6 +369,8 @@ class DownloadEngine(QObject):
         session = DownloadSession(spec, self._events)
         self._sessions[record.job_id] = session
         record.status = RUNNING
+        # the download has started, it does not wait for a time any more
+        record.start_after = 0.0
         session.start()
         self._active += 1
         self.busy_changed.emit(True)
@@ -448,12 +477,32 @@ class DownloadEngine(QObject):
         if self._jd_process is not None and self._jd_process.running:
             self._jd_process.stop()
 
+    # -- the link grabber -----------------------------------------------------
+    def collected_links(self) -> list[dict]:
+        """The links the engine holds in its collector.
+
+        They are the links ArkLoad handed over but did not start yet.
+        """
+        if self._jd is None:
+            return []
+        return self._jd.collected()
+
     # -- events ---------------------------------------------------------------
     def _tick(self) -> None:
         """Move the session events onto the GUI thread and refresh the live counters."""
         self._drain()
         self._poll_jdownloader()
+        self._start_waiting()
         self._emit_stats()
+
+    def _start_waiting(self) -> None:
+        """Start the downloads that wait for a free slot at their host."""
+        limit = max(1, int(self.options.per_host or 1))
+        for record in list(self._records.values()):
+            if record.state != TaskState.QUEUED or record.start_after > time.time():
+                continue
+            if self._host_busy(record.url, ignore=record.job_id) < limit:
+                self._start(record, self.options)
 
     def _poll_jdownloader(self) -> None:
         """Read the state of the downloads the JDownloader engine runs (once a second)."""

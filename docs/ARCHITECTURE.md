@@ -215,6 +215,27 @@ with the SHA-256 verification against MediaFire's own hash.  The routing is in
 ``DownloadEngine.engine_of()``: a link a host plugin knows goes to ArkLoad's engine, every other
 link goes to the JDownloader engine.
 
+### 2.7 The interface
+
+The window is a mix of the two references: the frame of **Free Download Manager** and the
+download management of **JDownloader 2**.
+
+| Part | What it is | Where it lives |
+|---|---|---|
+| The menu bar | File, Downloads, Settings, Tools, Help - the settings carry the preferences, the shutdown and the download settings (the chunks, the parallel downloads, the downloads per host, the speed limit) | `arkload_window._build_menu_bar` |
+| The command bar | start, pause, stop and add on the left, the pills of the sort, the filter and the selection behind them, the blue Add download button, the search field and the menu on the right | `arkload_window._build_command_bar` |
+| The navigation bar | the tabs of JDownloader 2 (Downloads, LinkGrabber, History) and the numbers of the list | `arkload_window._build_navigation_bar` |
+| The list | the columns of the references (`#`, name, size, status, the two speeds, the time that is left, the date), the facts of the download under the name, the progress bar and the percentage | `download_model`, `arkload_window.NameDelegate`, `StatusDelegate` |
+| The menu of a download | grouped into the file, the transfer, the list and the link; it belongs to the download under the cursor and every action knows when it can be used | `arkload_window._on_context_menu`, `_build_row_menu` |
+| The details card | the name, the path, the progress and the facts of the download, and the files it consists of (the list only appears when there are files) | `arkload_window.DetailsPanel` |
+| The overview | the packages, the speed, the loaded bytes, the time that is left, the open connections and the running downloads | `ui.OverviewBar` |
+| The bottom bar | the limiter, the settings, the live speeds and the download that is selected | `arkload_window._build_status_bar` |
+| The empty state | the area that accepts dropped links | `ui.DropArea` |
+| The colours and the icons | the design system | `styles.py` |
+
+The tabs are backed by the state of the tasks (`Task.matches_category`), so they show the real
+queue and not a copy of it.
+
 ## 3. The MediaFire downloader audit (this repository)
 
 

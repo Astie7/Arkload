@@ -165,9 +165,12 @@ class Task:
         return True
 
     def matches_category(self, category: str) -> bool:
-        """The categories of the sidebar, all of them backed by the real state."""
+        """The categories of the tabs, all of them backed by the real state."""
         if category in ("", "All downloads"):
             return True
+        if category == "Active downloads":
+            # everything that still has work left (running, queued, being verified)
+            return self.state.unfinished
         if category == "Downloading":
             return self.state in (TaskState.RUNNING, TaskState.VERIFYING)
         if category == "Queued":
@@ -191,7 +194,8 @@ class Task:
             return "Completed"
         if self.state == TaskState.INCOMPLETE:
             return f"Incomplete {self.verified_files}/{self.total_files}"
-        if self.state == TaskState.QUEUED and self.start_after:
+        if self.state == TaskState.QUEUED and self.start_after > time.time():
+            # it waits for its time - as soon as the time has come it is a normal download
             return "Scheduled"
         return self.state.label
 

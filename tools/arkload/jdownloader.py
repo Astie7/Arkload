@@ -470,6 +470,21 @@ class JDownloaderBackend:
         except EngineError:
             return []
 
+    def collected(self) -> list[dict]:
+        """The links the engine holds in its link collector.
+
+        They are the links ArkLoad handed over but did not start yet.
+        """
+        collected = []
+        for link in self._collector_links():
+            info = link.get("infoMap") or {}
+            collected.append({
+                "name": str(link.get("name") or ""),
+                "size": int(info.get("size") or 0),
+                "state": "Collected",
+            })
+        return collected
+
     def _poll_task(self, task: EngineTask, packages: dict, collector_packages: dict,
                    collector_links: list) -> dict | None:
         """The state of one task."""

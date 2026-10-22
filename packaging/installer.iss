@@ -47,10 +47,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "jdownloaderengine"; Description: "Install the JDownloader 2 engine (GPLv3+/AGPL)"; GroupDescription: "The download engine for the links of other hosts:"; Flags: unchecked; Check: JDownloaderEngineTask
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "assets\arkload.ico"; DestDir: "{app}"; Flags: ignoreversion
+; the engine is a separate program - the user can leave the task unticked and point ArkLoad at
+; another build in the preferences
+Source: "jdownloader\engine\*"; DestDir: "{localappdata}\ArkLoad\engine"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: jdownloaderengine
 
 [Icons]
 Name: "{group}\{#AppShortName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
@@ -61,6 +65,12 @@ Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#AppExeName}"; IconFile
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+function JDownloaderEngineTask(): Boolean;
+begin
+  { the task is only offered when the engine was built next to the installer }
+  Result := DirExists(ExpandConstant('{src}\jdownloader\engine'));
+end;
+
 function InitializeSetup(): Boolean;
 var
   ResultCode: Integer;

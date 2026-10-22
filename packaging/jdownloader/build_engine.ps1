@@ -70,3 +70,16 @@ Write-Host "Start it with:  java -jar `"$dist\JDownloader.jar`""
 Write-Host "Enable the local API in `"$dist\cfg\org.jdownloader.api.RemoteAPIConfig.json`":"
 Write-Host '  {"port":3128,"deprecatedapienabled":true,"externinterfaceenabled":true,'
 Write-Host '   "jdanywhereapienabled":false,"externinterfacelocalhostonly":true,"enabled":true}'
+
+Info "the engine for the installer"
+# the parts the engine needs (the tools of the platforms are not used)
+$stage = Join-Path $PSScriptRoot "engine"
+if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+New-Item -ItemType Directory -Force $stage | Out-Null
+foreach ($item in @("JDownloader.jar", "Core.jar", "jd", "libs", "themes", "translations",
+                    "extensions", "licenses")) {
+    $source = Join-Path $dist $item
+    if (Test-Path $source) { Copy-Item $source $stage -Recurse -Force }
+}
+$size = [math]::Round(((Get-ChildItem $stage -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
+Write-Host "   $stage ($size MB) - the installer offers it as an optional task"

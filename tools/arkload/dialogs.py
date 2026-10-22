@@ -6,8 +6,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QTime, Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-                               QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-                               QPushButton, QTimeEdit, QVBoxLayout, QWidget)
+                               QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+                               QPlainTextEdit, QPushButton, QTimeEdit, QToolButton,
+                               QVBoxLayout, QWidget)
 
 try:  # package import
     from .. import mediafire_dl as dl
@@ -25,117 +26,93 @@ def is_torrent(path: str) -> bool:
 
 
 class AddDownloadDialog(QDialog):
-    """The 'New download' window: the link, where it goes, the name and the schedule."""
+    """The 'Add download' window: a link and a button, the way the reference shows it.
+
+    The folder of the download comes from the preferences; a download that has to go somewhere
+    else is moved afterwards ("Move to..." in the menu of the row).
+    """
 
     def __init__(self, parent: QWidget | None = None, destination: str = "", url: str = "",
                  history: list[str] | None = None, resolver=None):
         super().__init__(parent)
-        self.setWindowTitle("New download")
+        self.setWindowTitle("Add download")
         self.setModal(True)
         self.setMinimumWidth(540)
         self.selected_file: str = ""
         self.accepted_url: str = ""
         self.accepted: dict | None = None
-        #: tells which engine runs a link (``url -> "ArkLoad" | "JDownloader"``)
+        self.destination = destination
+        #: tells which engine runs a link (``url -> "arkload" | "jdownloader"``)
         self.resolver = resolver
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 16)
+        layout.setContentsMargins(18, 16, 18, 14)
         layout.setSpacing(12)
 
-        title = QLabel("New download")
+        # the head of the dialog
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        title = QLabel("Add download")
         title.setObjectName("Heading")
-        layout.addWidget(title)
+        head.addWidget(title)
+        head.addStretch(1)
+        close_button = QToolButton()
+        close_button.setText("✕")
+        close_button.setFixedSize(20, 20)
+        close_button.setToolTip("Close")
+        close_button.clicked.connect(self.reject)
+        head.addWidget(close_button)
+        layout.addLayout(head)
 
-        label = QLabel("Link")
-        label.setObjectName("FieldLabel")
-        label.setMaximumWidth(400)
-        layout.addWidget(label)
-        url_row = QHBoxLayout()
-        url_row.setSpacing(8)
+        self.hint_label = QLabel("Enter a link or choose a file with links")
+        self.hint_label.setObjectName("Muted")
+        layout.addWidget(self.hint_label)
+
+        # the link: the field and the button share one row
         self.url_edit = QLineEdit(url)
         self.url_edit.setPlaceholderText("https://www.mediafire.com/folder/abc123")
         self.url_edit.setClearButtonEnabled(True)
-        url_row.addWidget(self.url_edit, 1)
-        paste = QPushButton("Paste")
-        paste.setIcon(make_icon("clipboard", "#8E8E93"))
-        paste.clicked.connect(self._paste)
-        url_row.addWidget(paste)
-        layout.addLayout(url_row)
-
-        hint = QLabel("A MediaFire folder, a MediaFire file, a bare folder key such as "
-                      "dpqhf3ughd4j5 - or any other link, which the JDownloader engine "
-                      "downloads.")
-        hint.setObjectName("Muted")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        browse = QPushButton("Browse...")
+        browse.setIcon(make_icon("folder", "#8A929C"))
+        browse.setToolTip("Choose a file with the links")
+        browse.clicked.connect(self._choose_file)
+        layout.addWidget(self._input_row(self.url_edit, browse))
 
         self.engine_label = QLabel("")
         self.engine_label.setObjectName("Muted")
+        self.engine_label.setWordWrap(True)
         layout.addWidget(self.engine_label)
 
-        label = QLabel("Save to")
-        label.setObjectName("FieldLabel")
-        label.setMaximumWidth(400)
-        layout.addWidget(label)
-        save_row = QHBoxLayout()
-        save_row.setSpacing(8)
-        self.destination_combo = QComboBox()
-        self.destination_combo.setEditable(True)
-        folders = list(history or [])
-        if destination and destination not in folders:
-            folders.insert(0, destination)
-        self.destination_combo.addItems(folders)
-        self.destination_combo.setCurrentText(destination)
-        self.destination_combo.setMinimumWidth(360)
-        save_row.addWidget(self.destination_combo, 1)
-        folder_btn = QPushButton()
-        folder_btn.setIcon(make_icon("folder", "#8E8E93"))
-        folder_btn.setToolTip("Choose a folder")
-        folder_btn.setFixedSize(34, 30)
-        folder_btn.clicked.connect(self._choose_folder)
-        save_row.addWidget(folder_btn)
-        layout.addLayout(save_row)
-
-        label = QLabel("File name")
-        label.setObjectName("FieldLabel")
-        label.setMaximumWidth(400)
-        layout.addWidget(label)
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("The name of the folder that is created")
-        layout.addWidget(self.name_edit)
-
-        bottom = QHBoxLayout()
-        bottom.setSpacing(10)
-        self.schedule_check = QCheckBox("Scheduler")
-        self.schedule_check.setToolTip("Start the download later")
-        self.schedule_check.toggled.connect(self._toggle_schedule)
-        bottom.addWidget(self.schedule_check)
-        self.schedule_time = QTimeEdit(QTime.currentTime().addSecs(3600))
-        self.schedule_time.setDisplayFormat("HH:mm")
-        self.schedule_time.setVisible(False)
-        bottom.addWidget(self.schedule_time)
-        bottom.addStretch(1)
-        self.space_label = QLabel("")
-        self.space_label.setObjectName("Muted")
-        bottom.addWidget(self.space_label)
-        layout.addLayout(bottom)
-
+        # the buttons
         buttons = QHBoxLayout()
+        buttons.setSpacing(8)
         buttons.addStretch(1)
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        self.ok_button = QPushButton("DOWNLOAD")
+        self.ok_button = QPushButton("OK")
         self.ok_button.setObjectName("Accent")
+        self.ok_button.setEnabled(False)
         self.ok_button.clicked.connect(self._accept)
         buttons.addWidget(self.ok_button)
         layout.addLayout(buttons)
 
         self.url_edit.setFocus()
         self.url_edit.textChanged.connect(self._validate)
-        self.destination_combo.currentTextChanged.connect(self._update_space)
-        self._update_space()
+
+    # -- the layout ------------------------------------------------------------
+    @staticmethod
+    def _input_row(field, button) -> QWidget:
+        """A field and its button in one bordered row."""
+        row = QFrame()
+        row.setObjectName("InputRow")
+        box = QHBoxLayout(row)
+        box.setContentsMargins(10, 0, 5, 0)
+        box.setSpacing(6)
+        box.addWidget(field, 1)
+        button.setObjectName("Flat")
+        box.addWidget(button, 0)
+        return row
 
     # -- helpers --------------------------------------------------------------
     def _validate(self) -> None:
@@ -153,92 +130,51 @@ class AddDownloadDialog(QDialog):
         except Exception:  # noqa: BLE001 - the label is a hint, never a blocker
             engine = ""
         if engine == "arkload":
-            self.engine_label.setText("This link is downloaded by ArkLoad and verified "
-                                      "against MediaFire's SHA-256.")
+            self.engine_label.setText("ArkLoad downloads this link itself and checks the "
+                                      "files against the hash of the source.")
         elif engine == "jdownloader":
-            self.engine_label.setText("This link is downloaded by the JDownloader engine.")
+            self.engine_label.setText("The JDownloader engine downloads this link.")
         else:
             self.engine_label.setText("")
 
-    def _paste(self) -> None:
-        from PySide6.QtWidgets import QApplication
-        text = QApplication.clipboard().text().strip()
-        if text:
-            self.url_edit.setText(text)
-            self._validate()
-
-    def _choose_folder(self) -> None:
-        current = self.destination_combo.currentText().strip() or str(Path.home())
-        folder = QFileDialog.getExistingDirectory(self, "Choose the download folder", current)
-        if folder:
-            self.destination_combo.setCurrentText(folder)
-            self._update_space()
-
-    def _toggle_schedule(self, checked: bool) -> None:
-        self.schedule_time.setVisible(checked)
-
-    def _update_space(self) -> None:
-        """Show how much room is left on the destination drive."""
-        import shutil
-        folder = self.destination_combo.currentText().strip() or str(Path.home())
-        try:
-            free = shutil.disk_usage(folder).free
-        except OSError:
-            free = None
-        if free is None:
-            self.space_label.setText("")
+    def _choose_file(self) -> None:
+        """Choose a file that holds the links."""
+        path, _filter = QFileDialog.getOpenFileName(
+            self, "Choose a file with links", "", "All files (*)")
+        if not path:
             return
-        self.space_label.setText(f"Disk space: {free / (1024 ** 3):.0f} GB free")
+        if is_torrent(path):
+            QMessageBox.warning(self, "Add download",
+                                "ArkLoad does not download torrents.")
+            return
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            QMessageBox.warning(self, "Add download", f"The file cannot be read:\n\n{e}")
+            return
+        self.url_edit.setText(text.strip())
+        self._validate()
 
     def _accept(self) -> None:
         text = self.url_edit.text().strip()
         if not text:
-            QMessageBox.warning(self, "New download",
-                                "Enter a link to download.")
+            QMessageBox.warning(self, "Add download", "Enter a link to download.")
             return
         if is_torrent(text):
-            QMessageBox.warning(
-                self, "New download",
-                "ArkLoad does not download torrents.")
+            QMessageBox.warning(self, "Add download",
+                                "ArkLoad does not download torrents.")
             return
         if not (text.startswith("http://") or text.startswith("https://")):
             # a bare MediaFire folder key is allowed, everything else has to be a link
             try:
                 dl.parse_source(text)
             except Exception as e:  # noqa: BLE001 - show the reason to the user
-                QMessageBox.warning(self, "New download",
+                QMessageBox.warning(self, "Add download",
                                     f"That link cannot be used:\n\n{e}")
                 return
-        destination = self.destination_combo.currentText().strip()
-        if not destination:
-            QMessageBox.warning(self, "New download", "Choose a folder for the download.")
-            return
-        try:
-            Path(destination).expanduser().mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            QMessageBox.warning(self, "New download", f"The folder cannot be used:\n\n{e}")
-            return
         self.accepted_url = text
-        self.accepted = {
-            "url": text,
-            "dest": str(Path(destination).expanduser()),
-            "source": None,
-            "name": self.name_edit.text().strip(),
-            "schedule": self._schedule_time(),
-        }
+        self.accepted = {"url": text, "dest": self.destination, "source": None, "name": ""}
         self.accept()
-
-    def _schedule_time(self) -> float:
-        """The chosen start time as a unix timestamp (0 when the scheduler is off)."""
-        if not self.schedule_check.isChecked():
-            return 0.0
-        from datetime import datetime, timedelta
-        chosen = self.schedule_time.time().toPython()
-        now = datetime.now()
-        target = now.replace(hour=chosen.hour, minute=chosen.minute, second=0, microsecond=0)
-        if target <= now:
-            target += timedelta(days=1)
-        return target.timestamp()
 
 
 class RenameDialog(QDialog):

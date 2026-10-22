@@ -18,7 +18,19 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, Q
 from .download_engine import EngineOptions
 
 SECTIONS = ("General", "Download Engine", "Browser Integration", "Network", "Traffic Limits",
-            "BitTorrent", "Advanced")
+            "Advanced")
+
+#: the short explanation under the title of every section
+SECTION_HINTS = {
+    "General": "The look of the application and the folder the downloads go to.",
+    "Download Engine": "The MediaFire links are downloaded by ArkLoad itself, every other link "
+                       "by the JDownloader 2 engine, which runs hidden in the background.",
+    "Browser Integration": "The extension that puts the links of the page you are on into "
+                           "ArkLoad.",
+    "Network": "How many files are downloaded at the same time and how often a file is retried.",
+    "Traffic Limits": "The speed limit of the transfers.",
+    "Advanced": "The recovery passes, the integrity check and the resume after a restart.",
+}
 
 
 class PreferencesView(QWidget):
@@ -34,7 +46,6 @@ class PreferencesView(QWidget):
         super().__init__(parent)
         self.options = options or EngineOptions()
         self.settings = settings if settings is not None else {}
-        self.ui_style = "New"
         self.language = "English (United States)"
         self.launch_at_startup = False
         self.suggest_by_type = True
@@ -71,7 +82,7 @@ class PreferencesView(QWidget):
     def _page(self, name: str) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(34, 26, 34, 24)
+        layout.setContentsMargins(28, 22, 28, 22)
         layout.setSpacing(14)
 
         header = QHBoxLayout()
@@ -81,9 +92,16 @@ class PreferencesView(QWidget):
         header.addStretch(1)
         layout.addLayout(header)
 
-        body = QWidget()
+        hint = QLabel(SECTION_HINTS.get(name, ""))
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        hint.setVisible(bool(SECTION_HINTS.get(name)))
+        layout.addWidget(hint)
+
+        body = QFrame()
+        body.setObjectName("Panel")
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setContentsMargins(20, 18, 20, 18)
         body_layout.setSpacing(12)
         layout.addWidget(body)
         layout.addStretch(1)
@@ -98,8 +116,6 @@ class PreferencesView(QWidget):
             self._build_network(body_layout)
         elif name == "Traffic Limits":
             self._build_limits(body_layout)
-        elif name == "BitTorrent":
-            self._build_torrent(body_layout)
         else:
             self._build_advanced(body_layout)
         return page
@@ -197,15 +213,6 @@ class PreferencesView(QWidget):
         hint.setObjectName("Muted")
         layout.addWidget(hint)
 
-        style_form = QFormLayout()
-        style_form.setSpacing(10)
-        self.style_combo = QComboBox()
-        self.style_combo.setMaximumWidth(220)
-        self.style_combo.addItems(["New", "Classic"])
-        self.style_combo.currentTextChanged.connect(self._on_style)
-        style_form.addRow("UI style", self.style_combo)
-        layout.addLayout(style_form)
-
         language_form = QFormLayout()
         language_form.setSpacing(10)
         self.language_combo = QComboBox()
@@ -219,14 +226,18 @@ class PreferencesView(QWidget):
         note.setObjectName("Muted")
         layout.addWidget(note)
 
-        layout.addWidget(QLabel("Options"))
+        label = QLabel("Options")
+        label.setObjectName("SubHeading")
+        layout.addWidget(label)
         self.launch_check = QCheckBox("Launch at startup (minimized)")
         self.launch_check.setToolTip(
             "Creates a 'Run' entry in the Windows registry for this application.")
         self.launch_check.toggled.connect(self._on_launch)
         layout.addWidget(self.launch_check)
 
-        layout.addWidget(QLabel("Default download folder"))
+        label = QLabel("Default download folder")
+        label.setObjectName("SubHeading")
+        layout.addWidget(label)
         self.auto_folder_radio = QRadioButton("Choose default download folder automatically")
         self.auto_folder_radio.setChecked(True)
         self.auto_folder_radio.toggled.connect(self._on_folder_mode)
@@ -345,19 +356,6 @@ class PreferencesView(QWidget):
         note.setObjectName("Muted")
         layout.addWidget(note)
 
-    def _build_torrent(self, layout: QVBoxLayout) -> None:
-        label = QLabel(
-            "ArkLoad downloads MediaFire folders, files and folder keys. There is no torrent client "
-            "in this build, so a .torrent file is refused with a clear message instead of being "
-            "pretended to work.")
-        label.setWordWrap(True)
-        label.setObjectName("Muted")
-        layout.addWidget(label)
-        button = QPushButton("Open the add-on folder")
-        button.setToolTip("An add-on could teach ArkLoad new sources.")
-        button.clicked.connect(self._open_addon_folder)
-        layout.addWidget(button)
-
     def _build_advanced(self, layout: QVBoxLayout) -> None:
         form = QFormLayout()
         form.setSpacing(10)
@@ -385,7 +383,9 @@ class PreferencesView(QWidget):
         ffmpeg_form.addRow("ffmpeg", self.ffmpeg_edit)
         layout.addLayout(ffmpeg_form)
 
-        layout.addWidget(QLabel("MediaFire cookies"))
+        label = QLabel("MediaFire cookies")
+        label.setObjectName("SubHeading")
+        layout.addWidget(label)
         self.cookies_edit = QLineEdit(self.options.cookies)
         self.cookies_edit.setMaximumWidth(520)
         self.cookies_edit.setPlaceholderText("ukey=…; user=…  (never saved to disk)")
@@ -408,9 +408,6 @@ class PreferencesView(QWidget):
         if theme is None:
             theme = "dark"
         self.theme_changed.emit(theme)
-
-    def _on_style(self, text: str) -> None:
-        self.ui_style = text
 
     def _on_launch(self, checked: bool) -> None:
         self.launch_at_startup = checked
@@ -489,7 +486,6 @@ class PreferencesView(QWidget):
         """Apply the persisted settings to the widgets."""
         theme = settings.get("theme", "dark")
         self.theme_combo.setCurrentText({"dark": "Dark", "light": "Light"}.get(theme, "Dark"))
-        self.style_combo.setCurrentText(settings.get("ui_style", "New"))
         self.launch_check.setChecked(bool(settings.get("launch_at_startup", False)))
         self.folder_edit.setText(settings.get("destination", self.options.destination))
         if settings.get("fixed_folder"):

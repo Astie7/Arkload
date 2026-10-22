@@ -22,12 +22,12 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QKeySequence, QPainter,
                          QPalette, QPainterPath, QPen, QShortcut)
-from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton,
-                               QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
-                               QTableView, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QGridLayout,
+                               QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar,
+                               QPushButton, QSizePolicy, QStackedWidget, QStyledItemDelegate,
+                               QStyle, QTableView, QToolButton, QTreeWidget, QTreeWidgetItem,
+                               QVBoxLayout, QWidget)
 
 try:  # package import
     from .. import mediafire_resume as rs
@@ -36,8 +36,9 @@ except ImportError:  # direct script run
     import mediafire_resume as rs  # type: ignore[no-redef]
 
 from . import styles
-from .core import CATEGORIES
+from .core import TaskState
 from .addons import AddonManager
+from .ui import DropArea, OverviewBar, TabStrip
 from .browser_extension import write_extension
 from .converter import convert, find_ffmpeg
 from .dialogs import (AboutDialog, AddDownloadDialog, AddonsDialog, ConvertDialog,
@@ -46,10 +47,10 @@ from .dialogs import (AboutDialog, AddDownloadDialog, AddonsDialog, ConvertDialo
 from .portable import create_portable
 from .download_engine import (DownloadEngine, EngineOptions, REPO_URL, open_in_file_manager,
                               open_url)
-from .download_model import (DownloadRecord, DownloadTableModel, FILTER_MODES, PRIORITY_HIGH,
-                             PRIORITY_LOW, PRIORITY_MEDIUM, RATE_PRESETS, RUNNING,
-                             SELECTION_MODES, SORT_MODES, fmt_added, fmt_duration, fmt_rate,
-                             fmt_size, fmt_speed)
+from .download_model import (DownloadRecord, DownloadTableModel, FILTER_MODES,
+                             LinkGrabberModel, PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_MEDIUM,
+                             RATE_PRESETS, RUNNING, SELECTION_MODES, SORT_MODES, fmt_added,
+                             fmt_duration, fmt_rate, fmt_size, fmt_speed)
 from .preferences_view import PreferencesView
 from . import settings as settings_store
 from .settings import default_destination, load_settings, save_settings
@@ -57,6 +58,21 @@ from .settings import default_destination, load_settings, save_settings
 APP_NAME = "ArkLoad"
 APP_SHORT_NAME = "ArkLoad"
 VERSION = "1.0"
+
+#: the tabs of the interface, the way JDownloader 2 shows them
+TABS = ("Downloads", "LinkGrabber", "History")
+
+#: the icon of every tab
+TAB_ICONS = ("download", "link", "history")
+
+#: what every tab shows (a category of the queue)
+TAB_CATEGORIES = {"Downloads": "Active downloads", "LinkGrabber": "", "History": "History"}
+
+#: the page every tab shows (the downloads and the history share the table)
+TAB_PAGES = {"Downloads": 0, "LinkGrabber": 1, "History": 0}
+
+#: the tab that shows the collected links
+TAB_GRABBER = "LinkGrabber"
 TORRENT_SUPPORTED = False          # this build does not download torrents
 
 
@@ -67,70 +83,6 @@ def engine_name(record) -> str:
     return "ArkLoad (MediaFire)"
 
 
-class DropZone(QWidget):
-    """The dashed area that accepts dropped links."""
-
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setAcceptDrops(False)      # the main window handles the drop
-        self.setMinimumHeight(140)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.colours = dict(styles.DARK)
-
-    def set_colours(self, colours: dict) -> None:
-        self.colours = dict(colours)
-        self.update()
-
-    def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        pen = QPen(QColor(self.colours.get("border", "#333336")))
-        pen.setStyle(Qt.DashLine)
-        pen.setWidth(1)
-        painter.setPen(pen)
-        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 10, 10)
-
-        centre = self.rect().center()
-        icon_size = 18
-        gap = 8
-        text = "Drag-and-drop a link or a folder key"
-        font = QFont(self.font())
-        font.setPixelSize(15)
-        painter.setFont(font)
-        metrics = painter.fontMetrics()
-        text_width = metrics.horizontalAdvance(text)
-        group_width = icon_size + gap + text_width
-        start_x = centre.x() - group_width // 2
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(self.colours.get("muted", "#8E8E93")))
-        self._draw_drop_glyph(painter, start_x, centre.y() - icon_size // 2, icon_size)
-        painter.setPen(QColor(self.colours.get("muted", "#8E8E93")))
-        painter.drawText(start_x + icon_size + gap, centre.y() + 5, text)
-        painter.end()
-
-    def _draw_drop_glyph(self, painter: QPainter, x: int, y: int, size: int) -> None:
-        """A small 'drag' arrow, drawn with the painter so no image files are needed."""
-        from PySide6.QtCore import QPointF
-        from PySide6.QtGui import QPainterPath
-        painter.save()
-        pen = QPen(QColor(self.colours.get("muted", "#8E8E93")))
-        pen.setWidthF(1.5)
-        pen.setCapStyle(Qt.RoundCap)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        path = QPainterPath()
-        path.moveTo(QPointF(x + size * 0.15, y + size * 0.05))
-        path.lineTo(QPointF(x + size * 0.15, y + size * 0.75))
-        path.lineTo(QPointF(x + size * 0.42, y + size * 0.5))
-        path.lineTo(QPointF(x + size * 0.62, y + size * 0.9))
-        path.lineTo(QPointF(x + size * 0.78, y + size * 0.82))
-        path.lineTo(QPointF(x + size * 0.58, y + size * 0.42))
-        path.lineTo(QPointF(x + size * 0.9, y + size * 0.35))
-        path.closeSubpath()
-        painter.drawPath(path)
-        painter.restore()
-
-
 class DownloadTableView(QTableView):
     """The download table, with a context menu and a per-row actions button."""
 
@@ -138,6 +90,7 @@ class DownloadTableView(QTableView):
     actions_requested = Signal(QPoint)
     pause_requested = Signal()
     cancel_requested = Signal()
+    delete_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -167,20 +120,32 @@ class DownloadTableView(QTableView):
         if key in (Qt.Key_Space, Qt.Key_Pause):
             self.pause_requested.emit()
             return
-        if key in (Qt.Key_Delete, Qt.Key_Backspace):
+        if key == Qt.Key_Delete:
+            # the delete key takes the download out of the list, it does not cancel it
+            self.delete_requested.emit()
+            return
+        if key == Qt.Key_Backspace:
             self.cancel_requested.emit()
             return
         super().keyPressEvent(event)
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802
-        index = self.indexAt(event.pos())
+        """The menu of the row under the cursor, the way the file manager does it.
+
+        The row under the cursor becomes the current one, so the menu always belongs to the
+        download the user pointed at.  The event is accepted, so no other menu shows up.
+        """
+        position = event.pos()
+        index = self.indexAt(position)
         if index.isValid():
             self.setCurrentIndex(index)
+        event.accept()
+        self.customContextMenuRequested.emit(position)
         self.context_requested.emit(event.globalPos())
 
 
 class NameDelegate(QStyledItemDelegate):
-    """Draws the name cell: a folder icon, the name and the expander of the reference."""
+    """Draws the name cell: the icon, the name and the facts under it."""
 
     expanded_requested = Signal(QPoint)
 
@@ -189,35 +154,55 @@ class NameDelegate(QStyledItemDelegate):
         self.colours = dict(styles.DARK)
 
     def _expander_rect(self, option) -> QRectF:
-        rect = option.rect.adjusted(6, 0, -6, 0)
-        return QRectF(rect.left(), rect.center().y() - 5, 11, 11)
+        rect = option.rect.adjusted(8, 0, -6, 0)
+        return QRectF(rect.left(), rect.top() + 15, 12, 12)
 
     def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
         painter.save()
         if option.state & QStyle.State_Selected:
-            painter.fillRect(option.rect, option.palette.highlight())
+            painter.fillRect(option.rect, QColor(self.colours.get("selection", "#20262E")))
         painter.setRenderHint(QPainter.Antialiasing, True)
-        rect = option.rect.adjusted(6, 0, -6, 0)
+        rect = option.rect.adjusted(8, 0, -6, 0)
         x = rect.left()
         if index.data(DownloadTableModel.EXPANDER_ROLE):
             box = self._expander_rect(option)
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(self.colours.get("muted", "#8E8E93")))
+            painter.setBrush(QColor(self.colours.get("faint", "#5A626C")))
             path = QPainterPath()
             path.moveTo(box.left() + 3, box.top() + 2)
-            path.lineTo(box.left() + 9, box.center().y())
+            path.lineTo(box.left() + 10, box.center().y())
             path.lineTo(box.left() + 3, box.bottom() - 2)
             path.closeSubpath()
             painter.drawPath(path)
             x = box.right() + 6
         icon = index.data(Qt.DecorationRole)
         if icon is not None:
-            icon.paint(painter, QRect(int(x), option.rect.center().y() - 8, 16, 16))
-            x += 22
+            icon.paint(painter, QRect(int(x), option.rect.center().y() - 10, 20, 20))
+            x += 26
+
+        status = index.data(DownloadTableModel.STATUS_ROLE) or {}
+        subtitle = str(status.get("subtitle") or "")
+
+        # the name
+        font = painter.font()
+        font.setPixelSize(13)
+        font.setWeight(QFont.DemiBold)
+        painter.setFont(font)
         painter.setPen(option.palette.color(QPalette.Text))
-        painter.drawText(QRect(int(x), option.rect.top(), option.rect.right() - int(x),
-                               option.rect.height()),
+        painter.drawText(QRect(int(x), rect.top() + 6, rect.right() - int(x),
+                               rect.height() // 2 + 4),
                          Qt.AlignLeft | Qt.AlignVCenter, str(index.data(Qt.DisplayRole) or ""))
+
+        # the facts of the download under the name
+        if subtitle:
+            small = QFont(painter.font())
+            small.setPixelSize(11)
+            small.setWeight(QFont.Normal)
+            painter.setFont(small)
+            painter.setPen(QColor(self.colours.get("muted", "#8A929C")))
+            painter.drawText(QRect(int(x), rect.top() + rect.height() // 2 - 4,
+                                   rect.right() - int(x), rect.height() // 2),
+                             Qt.AlignLeft | Qt.AlignVCenter, subtitle)
         painter.restore()
 
     def editorEvent(self, event, model, option, index) -> bool:  # noqa: N802
@@ -232,29 +217,46 @@ class NameDelegate(QStyledItemDelegate):
 
 
 class StatusDelegate(QStyledItemDelegate):
-    """Draws the status cell of the reference: a progress bar, the percentage and the priority."""
+    """Draws the status cell: the progress bar and the percentage."""
 
-    #: the row whose priority chip was clicked
+    #: the row whose priority was clicked
     priority_requested = Signal(QPoint)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.colours = dict(styles.DARK)
 
+    def _bar_colour(self, data: dict) -> str:
+        if data.get("failed"):
+            return self.colours.get("danger", "#F04438")
+        if data.get("complete"):
+            return self.colours.get("success", "#3DD68C")
+        if data.get("paused"):
+            return self.colours.get("warning", "#F5A524")
+        return self.colours.get("accent", "#3D9BFF")
+
+    def _bar_width(self, rect) -> int:
+        return max(48, min(150, rect.width() // 3))
+
     def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
         data = index.data(DownloadTableModel.STATUS_ROLE) or {}
         painter.save()
         if option.state & QStyle.State_Selected:
-            painter.fillRect(option.rect, option.palette.highlight())
+            painter.fillRect(option.rect, QColor(self.colours.get("selection", "#20262E")))
         painter.setRenderHint(QPainter.Antialiasing, True)
 
-        rect = option.rect.adjusted(6, 0, -6, 0)
+        rect = option.rect.adjusted(8, 0, -8, 0)
         text = str(data.get("text") or "")
         percent = int(data.get("percent") or 0)
         show_bar = data.get("active") or percent > 0
 
         if not show_bar:
-            painter.setPen(option.palette.color(QPalette.Text))
+            # nothing runs: the state of the download is enough
+            font = painter.font()
+            font.setPixelSize(13)
+            font.setWeight(QFont.DemiBold)
+            painter.setFont(font)
+            painter.setPen(QColor(self.colours.get("accent", "#3D9BFF")))
             painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, text)
             painter.restore()
             return
@@ -262,156 +264,156 @@ class StatusDelegate(QStyledItemDelegate):
         font = painter.font()
         metrics = QFontMetrics(font)
         percent_text = f"{percent}%"
-        bar_width = max(40, min(110, rect.width() // 3))
+        bar_width = self._bar_width(rect)
         text_width = metrics.horizontalAdvance(percent_text)
-        bar_rect = QRectF(rect.left(), rect.center().y() - 3, bar_width, 6)
+        bar_rect = QRectF(rect.left(), rect.center().y() - 3.5, bar_width, 7)
 
+        # the track
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(self.colours.get("border", "#333336")))
-        painter.drawRoundedRect(bar_rect, 3, 3)
+        painter.setBrush(QColor(self.colours.get("border", "#232932")))
+        painter.drawRoundedRect(bar_rect, 3.5, 3.5)
+        # the fill
         if percent > 0:
             filled = QRectF(bar_rect)
-            filled.setWidth(max(3.0, bar_rect.width() * percent / 100.0))
-            painter.setBrush(QColor(self.colours.get("accent", "#4CD3FF")))
-            painter.drawRoundedRect(filled, 3, 3)
+            filled.setWidth(max(4.0, bar_rect.width() * min(percent, 100) / 100.0))
+            painter.setBrush(QColor(self._bar_colour(data)))
+            painter.drawRoundedRect(filled, 3.5, 3.5)
 
-        painter.setPen(QColor(self.colours.get("muted", "#8E8E93")))
-        painter.drawText(QRectF(bar_rect.right() + 8, rect.top(), text_width + 4, rect.height()),
+        font.setPixelSize(12)
+        font.setWeight(QFont.DemiBold)
+        painter.setFont(font)
+        painter.setPen(QColor(self._bar_colour(data)))
+        painter.drawText(QRectF(bar_rect.right() + 8, rect.top(), text_width + 6, rect.height()),
                          Qt.AlignLeft | Qt.AlignVCenter, percent_text)
-
-        # the priority, the way the reference shows it in the row
-        if not data.get("failed"):
-            chip = "⌄ " + str(data.get("priority") or "HIGH")
-            chip_x = bar_rect.right() + 16 + text_width
-            if chip_x + metrics.horizontalAdvance(chip) < rect.right():
-                painter.setPen(QColor(self.colours.get("success", "#22C55E")))
-                painter.drawText(QRectF(chip_x, rect.top(), 120, rect.height()),
-                                 Qt.AlignLeft | Qt.AlignVCenter, chip)
         painter.restore()
 
     def editorEvent(self, event, model, option, index) -> bool:  # noqa: N802
-        """A click on the priority chip opens the priority menu."""
+        """A click on the row opens the priority menu."""
         if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
             data = index.data(DownloadTableModel.STATUS_ROLE) or {}
-            if not data.get("failed") and data.get("priority"):
-                rect = option.rect.adjusted(6, 0, -6, 0)
-                metrics = QFontMetrics(self.parent().font() if self.parent() else QFont())
-                bar_width = max(40, min(110, rect.width() // 3))
-                chip_x = rect.left() + bar_width + 16 + metrics.horizontalAdvance("100%")
-                if chip_x <= event.pos().x() <= chip_x + 80:
-                    self.priority_requested.emit(index)
-                    return True
+            if data.get("priority"):
+                self.priority_requested.emit(index)
+                return True
         return super().editorEvent(event, model, option, index)
 
 
 class DetailsPanel(QWidget):
-    """The details card at the bottom: progress, speeds, the path and the links.
+    """The details card at the bottom: the download, its facts and its files.
 
-    It is collapsed by default and only opened with the arrow in the status bar or by
-    clicking a download in the list.
+    It is collapsed by default and only opened with the arrow in the status bar or by clicking a
+    download in the list.
     """
 
     priority_requested = Signal()
 
+    #: the facts of the download, in the order they are shown
+    FACTS = (("size", "Size"), ("speed", "Speed"), ("added", "Added"),
+             ("engine", "Engine"), ("priority", "Priority"))
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("DetailsCard")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(16)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 14, 18, 16)
+        layout.setSpacing(12)
+
+        # -- the download: the name, the path and the progress
+        head = QHBoxLayout()
+        head.setSpacing(12)
 
         self.icon_label = QLabel()
-        self.icon_label.setFixedSize(46, 46)
+        self.icon_label.setFixedSize(32, 32)
         self.icon_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.icon_label.setPixmap(styles.make_icon("folder", "#4CD3FF").pixmap(46, 46))
-        layout.addWidget(self.icon_label, 0, Qt.AlignTop)
+        self.icon_label.setPixmap(styles.make_icon("folder", "#3D9BFF").pixmap(32, 32))
+        head.addWidget(self.icon_label, 0, Qt.AlignTop)
 
-        info = QVBoxLayout()
-        info.setSpacing(4)
+        column = QVBoxLayout()
+        column.setSpacing(6)
+
         self.title_label = QLabel("")
-        self.title_label.setObjectName("Title")
-        info.addWidget(self.title_label)
+        self.title_label.setObjectName("Heading")
+        column.addWidget(self.title_label)
 
         path_row = QHBoxLayout()
         path_row.setSpacing(6)
         self.path_label = QLabel("")
         self.path_label.setObjectName("Muted")
+        self.path_label.setMaximumWidth(460)
+        self.path_label.setMinimumWidth(180)
         path_row.addWidget(self.path_label)
         copy_button = QToolButton()
-        copy_button.setIcon(styles.make_icon("clipboard", "#8E8E93"))
-        copy_button.setFixedSize(20, 20)
+        copy_button.setIcon(styles.make_icon("clipboard", "#8A929C"))
+        copy_button.setFixedSize(18, 18)
         copy_button.setToolTip("Copy the path")
         copy_button.clicked.connect(self._copy_path)
         path_row.addWidget(copy_button)
         path_row.addStretch(1)
-        info.addLayout(path_row)
+        self.page_link = QLabel("Open the page")
+        self.page_link.setObjectName("Link")
+        self.page_link.setOpenExternalLinks(False)
+        self.page_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        path_row.addWidget(self.page_link)
+        column.addLayout(path_row)
 
         bar_row = QHBoxLayout()
-        bar_row.setSpacing(8)
+        bar_row.setSpacing(10)
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setMaximumHeight(8)
+        self.progress_bar.setFixedHeight(6)
         bar_row.addWidget(self.progress_bar, 1)
         self.percent_label = QLabel("0%")
-        self.percent_label.setObjectName("Muted")
+        self.percent_label.setObjectName("FactValue")
         bar_row.addWidget(self.percent_label)
         self.remaining_label = QLabel("")
         self.remaining_label.setObjectName("Muted")
         bar_row.addWidget(self.remaining_label)
-        info.addLayout(bar_row)
+        column.addLayout(bar_row)
 
-        self.stats_row = QLabel("")
-        self.stats_row.setObjectName("Muted")
-        info.addWidget(self.stats_row)
+        head.addLayout(column, 1)
+        layout.addLayout(head)
 
-        self.engine_row = QLabel("")
-        self.engine_row.setObjectName("Muted")
-        info.addWidget(self.engine_row)
+        # -- the facts of the download, in one row
+        facts = QHBoxLayout()
+        facts.setSpacing(26)
+        self.fact_labels: dict = {}
+        for key, name in self.FACTS:
+            pair = QHBoxLayout()
+            pair.setSpacing(6)
+            title = QLabel(name)
+            title.setObjectName("FactKey")
+            pair.addWidget(title)
+            value = QLabel("—")
+            value.setObjectName("FactValue")
+            pair.addWidget(value)
+            facts.addLayout(pair)
+            self.fact_labels[key] = value
+        facts.addStretch(1)
+        layout.addLayout(facts)
 
-        self.priority_link = QLabel("Priority: high")
-        self.priority_link.setStyleSheet("color: #22C55E;")
-        self.priority_link.setCursor(Qt.PointingHandCursor)
-        self.priority_link.mousePressEvent = lambda _event: self.priority_requested.emit()
-        info.addWidget(self.priority_link)
-
-        self.page_link = QLabel("Web page:")
-        self.page_link.setStyleSheet("color: #4CD3FF;")
-        self.page_link.setOpenExternalLinks(False)
-        self.page_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        info.addWidget(self.page_link)
-
-        self.file_link = QLabel("File:")
-        self.file_link.setStyleSheet("color: #4CD3FF;")
-        self.file_link.setOpenExternalLinks(False)
-        self.file_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        info.addWidget(self.file_link)
-        layout.addLayout(info, 1)
-
-        # the state of every file of this download
-        files_box = QVBoxLayout()
-        files_box.setSpacing(2)
-        caption = QLabel("Files")
-        caption.setObjectName("Muted")
-        files_box.addWidget(caption)
+        # -- the files of the download (only when there are some)
+        self.files_caption = QLabel("Files")
+        self.files_caption.setObjectName("SubHeading")
+        self.files_caption.setVisible(False)
+        layout.addWidget(self.files_caption)
         self.progress_list = QTreeWidget()
         self.progress_list.setHeaderLabels(["File", "Size", "State"])
         self.progress_list.setRootIsDecorated(False)
-        self.progress_list.setColumnWidth(0, 300)
-        self.progress_list.setColumnWidth(1, 70)
-        self.progress_list.setColumnWidth(2, 90)
-        self.progress_list.setFixedWidth(460)
-        files_box.addWidget(self.progress_list, 1)
-        layout.addLayout(files_box, 1)
+        self.progress_list.setColumnWidth(0, 420)
+        self.progress_list.setColumnWidth(1, 90)
+        self.progress_list.setColumnWidth(2, 120)
+        self.progress_list.setFixedHeight(150)
+        self.progress_list.setVisible(False)
+        layout.addWidget(self.progress_list)
 
         self.close_button = QToolButton()
         self.close_button.setText("✕")
-        self.close_button.setFixedSize(22, 22)
+        self.close_button.setFixedSize(20, 20)
         self.close_button.setToolTip("Hide the details")
         self.close_button.clicked.connect(self._hide)
-        layout.addWidget(self.close_button, 0, Qt.AlignTop)
+        layout.addWidget(self.close_button, 0, Qt.AlignRight | Qt.AlignTop)
 
     def _copy_path(self) -> None:
-        QApplication.clipboard().setText(self.path_label.text())
+        QApplication.clipboard().setText(self.path_label.toolTip() or self.path_label.text())
 
     def _hide(self) -> None:
         self.setVisible(False)
@@ -422,9 +424,10 @@ class DetailsPanel(QWidget):
             self.setVisible(False)
             return
         self.title_label.setText(record.title)
-        self.path_label.setText(str(record.root or record.destination))
+        self.path_label.setToolTip(str(record.root or record.destination))
+        self.path_label.setText(self._elide(str(record.root or record.destination)))
         self.icon_label.setPixmap(styles.make_icon(
-            "folder" if record.is_folder else "file", "#4CD3FF").pixmap(46, 46))
+            "folder" if record.is_folder else "file", "#3D9BFF").pixmap(32, 32))
 
         percent = record.percent
         self.progress_bar.setMaximum(100)
@@ -432,21 +435,20 @@ class DetailsPanel(QWidget):
         self.percent_label.setText(f"{percent}%")
         remaining = self._remaining(record)
         self.remaining_label.setText(f"Remaining: {remaining}" if remaining else "")
-        self.stats_row.setText(
-            f"Downloaded: {fmt_size(record.bytes_done)} / {fmt_size(record.bytes_total)}"
-            f"      Added at: {fmt_added(record.added)}"
-            f"      Download speed: {fmt_speed(record.speed_down)}"
-            f"      Upload speed: {fmt_speed(record.speed_up)}")
-        self.engine_row.setText("Engine: " + engine_name(record))
-        self.priority_link.setText(f"Priority: {record.priority.lower()}")
-        colour = {"HIGH": "#22C55E", "MEDIUM": "#E0A93A", "LOW": "#EF5F5F"}.get(
-            record.priority, "#22C55E")
-        self.priority_link.setStyleSheet(f"color: {colour};")
-        self.page_link.setText(f"Web page: {record.url}")
+        self.page_link.setText("Open the page")
+        self.page_link.setToolTip(record.url)
         self.page_link.linkActivated.connect(open_url)
-        self.file_link.setText(f"File: {record.url}")
-        self.file_link.linkActivated.connect(open_url)
 
+        # the facts of the download
+        self.fact_labels["size"].setText(
+            f"{fmt_size(record.bytes_done)} of {fmt_size(record.bytes_total)}"
+            if record.bytes_total else "—")
+        self.fact_labels["speed"].setText(fmt_speed(record.speed_down))
+        self.fact_labels["added"].setText(fmt_added(record.added))
+        self.fact_labels["engine"].setText(engine_name(record))
+        self.fact_labels["priority"].setText(record.priority.lower())
+
+        # the files: the list only shows up when the download has files
         self.progress_list.clear()
         for item in record.files:
             state = {
@@ -459,6 +461,9 @@ class DetailsPanel(QWidget):
                 state = "Downloaded"
             self.progress_list.addTopLevelItem(
                 QTreeWidgetItem([item.path, fmt_size(item.size), state]))
+        has_files = bool(record.files)
+        self.progress_list.setVisible(has_files)
+        self.files_caption.setVisible(has_files)
 
         options = options or {}
         self.connection_info = (
@@ -466,6 +471,12 @@ class DetailsPanel(QWidget):
             f"{options.get('jobs', 1)} file(s) in parallel · "
             f"{options.get('retries', 3)} attempt(s) per file · "
             f"limit {fmt_rate(int(options.get('rate_limit', 0) or 0))}")
+
+    def _elide(self, text: str) -> str:
+        """The path is shortened, so it never pushes the other things away."""
+        width = max(180, min(460, self.path_label.width()) - 4)
+        metrics = QFontMetrics(self.path_label.font())
+        return metrics.elidedText(text, Qt.ElideMiddle, width)
 
     @staticmethod
     def _remaining(record) -> str:
@@ -504,6 +515,8 @@ class ArkLoadMainWindow(QMainWindow):
 
         self._build()
         self._apply_theme(self.theme)
+        # the first tab shows the downloads that still have work left
+        self.model.set_category(TAB_CATEGORIES.get(TABS[0], ""))
         self.update_checked.connect(self._on_update_checked)
         self.source_checked.connect(self._on_source_checked)
         self._connect_engine()
@@ -535,9 +548,12 @@ class ArkLoadMainWindow(QMainWindow):
             auto_resume=bool(settings.get("auto_resume", True)),
             engine_path=str(settings.get("engine_path", "") or ""),
             engine_port=int(settings.get("engine_port", 3128) or 3128),
+            per_host=int(settings.get("per_host", 2) or 2),
         )
 
     def _build(self) -> None:
+        self._setting_actions: dict = {}
+        self._build_menu_bar()
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
@@ -551,142 +567,165 @@ class ArkLoadMainWindow(QMainWindow):
 
         root.addWidget(self._build_status_bar())
 
+    def _build_menu_bar(self) -> None:
+        """The menu bar of JDownloader 2: the commands that do not fit into the bars."""
+        bar = self.menuBar()
+        bar.setNativeMenuBar(False)
+        colours = styles.palette(self.theme)
+
+        file_menu = bar.addMenu("&File")
+        new_action = file_menu.addAction("&New download...")
+        new_action.setShortcut("Ctrl+N")
+        new_action.triggered.connect(self._add_download)
+        file_menu.addSeparator()
+        export_action = file_menu.addAction("&Export downloads...")
+        export_action.triggered.connect(self._export_downloads)
+        import_action = file_menu.addAction("&Import downloads...")
+        import_action.triggered.connect(self._import_downloads)
+        file_menu.addSeparator()
+        exit_action = file_menu.addAction("E&xit")
+        exit_action.setShortcut("Alt+F4")
+        exit_action.triggered.connect(self.close)
+
+        downloads_menu = bar.addMenu("&Downloads")
+        start_action = downloads_menu.addAction("Start all")
+        start_action.triggered.connect(self._start_all)
+        pause_action = downloads_menu.addAction("Pause all")
+        pause_action.triggered.connect(self._pause_all)
+        stop_action = downloads_menu.addAction("Stop all")
+        stop_action.triggered.connect(self._stop_all)
+        downloads_menu.addSeparator()
+        select_action = downloads_menu.addAction("Select all")
+        select_action.triggered.connect(lambda: self._toggle_select_all(True))
+        tags_action = downloads_menu.addAction("Tags...")
+        tags_action.triggered.connect(self._edit_tags_of_the_selection)
+        export_action = downloads_menu.addAction("Export the downloads...")
+        export_action.triggered.connect(self._export_downloads)
+        remove_action = downloads_menu.addAction("Remove the finished downloads")
+        remove_action.triggered.connect(self._remove_finished)
+
+        settings_menu = bar.addMenu("&Settings")
+
+        preferences_action = settings_menu.addAction("&Preferences...")
+        preferences_action.triggered.connect(self._show_preferences)
+        settings_menu.addSeparator()
+
+        # the shutdown, the three ways of it in one place
+        shutdown_menu = settings_menu.addMenu("&Shutdown")
+        for label, kind in (("Shutdown when the downloads finish", "shutdown"),
+                            ("Restart when the downloads finish", "restart"),
+                            ("Log off when the downloads finish", "logoff")):
+            action = shutdown_menu.addAction(label)
+            action.triggered.connect(lambda _checked=False, value=kind:
+                                     self._arm_shutdown(value))
+        settings_menu.addSeparator()
+
+        # the download settings of the reference
+        self._add_setting_menu(settings_menu, "Max. chunks per download",
+                               range(1, 17), self.engine.options.connections,
+                               self._set_connections)
+        self._add_setting_menu(settings_menu, "Max. simultaneous downloads",
+                               range(1, 17), self.engine.options.parallel,
+                               self._set_parallel)
+        self._add_setting_menu(settings_menu, "Max. simultaneous downloads per hoster",
+                               range(1, 17), self.engine.options.per_host,
+                               self._set_per_host)
+        self._add_setting_menu(settings_menu, "Speed limit",
+                               [value for _label, value in RATE_PRESETS],
+                               self.engine.options.rate_limit, self._set_rate_limit)
+
+        tools_menu = bar.addMenu("&Tools")
+        addons_action = tools_menu.addAction("&Add-ons...")
+        addons_action.triggered.connect(self._show_addons)
+        for _addon, label, callback in list(self.addons.menu_actions):
+            action = tools_menu.addAction(label)
+            action.triggered.connect(callback)
+        tools_menu.addSeparator()
+        update_action = tools_menu.addAction("Check for &updates")
+        update_action.triggered.connect(self._check_for_updates)
+
+        help_menu = bar.addMenu("&Help")
+        about_action = help_menu.addAction("&About ArkLoad")
+        about_action.triggered.connect(self._show_about)
+
+        bar.setStyleSheet(
+            f"QMenuBar {{ background-color: {colours['bar']};"
+            f" border-bottom: 1px solid {colours['border_soft']}; }}"
+            f"QMenuBar::item {{ padding: 5px 10px; border-radius: 5px; }}"
+            f"QMenuBar::item:selected {{ background-color: {colours['hover']}; }}")
+
     # -- dashboard ------------------------------------------------------------
+    def _add_setting_menu(self, menu: QMenu, title: str, values, current: int,
+                          handler) -> None:
+        """One setting in the menu, with the values the reference shows."""
+        submenu = menu.addMenu(title)
+        group = submenu.menuAction()
+        actions = []
+        for value in values:
+            action = submenu.addAction(str(value))
+            action.setCheckable(True)
+            action.setChecked(int(value) == int(current))
+            action.triggered.connect(lambda _checked=False, chosen=value: handler(chosen))
+            actions.append(action)
+        self._setting_actions[title] = actions
+
+    def _set_connections(self, value: int) -> None:
+        """The number of connections a file is fetched with."""
+        self.engine.options.connections = int(value)
+        self._after_setting_changed()
+        self._on_engine_message(f"{value} connection(s) per file")
+
+    def _set_parallel(self, value: int) -> None:
+        """The number of files that are downloaded at the same time."""
+        self.engine.options.parallel = int(value)
+        self._after_setting_changed()
+        self._on_engine_message(f"{value} file(s) in parallel")
+
+    def _set_per_host(self, value: int) -> None:
+        """The number of downloads that may run at the same time per host."""
+        self.engine.options.per_host = int(value)
+        self._after_setting_changed()
+        self._on_engine_message(f"{value} download(s) at the same time per host")
+
+    def _after_setting_changed(self) -> None:
+        """Keep the settings, the menu and the preferences in step."""
+        self._save_settings()
+        self._update_setting_menus()
+
+    def _update_setting_menus(self) -> None:
+        """Show the value that is set in the menu."""
+        values = {
+            "Max. chunks per download": self.engine.options.connections,
+            "Max. simultaneous downloads": self.engine.options.parallel,
+            "Max. simultaneous downloads per hoster": self.engine.options.per_host,
+            "Speed limit": self.engine.options.rate_limit,
+        }
+        for title, actions in getattr(self, "_setting_actions", {}).items():
+            current = int(values.get(title, 0))
+            for action, value in zip(actions, [int(a.text()) for a in actions]):
+                action.setChecked(int(value) == current)
+
     def _build_dashboard(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        toolbar = QFrame()
-        toolbar.setObjectName("Toolbar")
-        bar = QHBoxLayout(toolbar)
-        bar.setContentsMargins(14, 10, 14, 10)
-        bar.setSpacing(8)
+        layout.addWidget(self._build_command_bar())
+        layout.addWidget(self._build_navigation_bar())
 
-        self.select_all_button = QToolButton()
-        self.select_all_button.setCheckable(True)
-        self.select_all_button.setFixedSize(28, 28)
-        self.select_all_button.setToolTip("Select all downloads")
-        self.select_all_button.setIcon(styles.make_icon("checkbox",
-                                                        styles.palette(self.theme)["text"]))
-        self.select_all_button.clicked.connect(self._toggle_select_all)
-        bar.addWidget(self.select_all_button)
+        # the content of the tabs
+        self.pages = QStackedWidget()
 
-        self.selection_button = QToolButton()
-        self.selection_button.setFixedSize(28, 28)
-        self.selection_button.setIcon(styles.make_icon("chevron", styles.palette(self.theme)["muted"]))
-        self.selection_button.setToolTip("Show: all / downloads only / uploads only / completed / "
-                                         "stopped")
-        self.selection_button.setPopupMode(QToolButton.InstantPopup)
-        self.selection_mode = "All"
-        self.selection_menu = QMenu(self)
-        self.selection_actions = {}
-        for mode in SELECTION_MODES:
-            action = self.selection_menu.addAction(mode)
-            action.setCheckable(True)
-            action.triggered.connect(lambda _checked=False, value=mode:
-                                     self._on_selection_mode(value))
-            self.selection_actions[mode] = action
-        self.selection_button.setMenu(self.selection_menu)
-        bar.addWidget(self.selection_button)
+        outer = QVBoxLayout()
+        outer.setContentsMargins(12, 10, 12, 10)
 
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(SORT_MODES)
-        self.sort_combo.setFixedWidth(120)
-        self.sort_combo.currentTextChanged.connect(self._on_sort)
-        bar.addWidget(self.sort_combo)
-
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItems(FILTER_MODES)
-        self.filter_combo.setFixedWidth(120)
-        self.filter_combo.currentTextChanged.connect(self._on_filter)
-        bar.addWidget(self.filter_combo)
-
-        # the actions of the selection, they sit right next to the filters
-        self.selection_bar = QWidget()
-        selection_layout = QHBoxLayout(self.selection_bar)
-        selection_layout.setContentsMargins(8, 0, 0, 0)
-        selection_layout.setSpacing(6)
-        self.selected_label_toolbar = QLabel("")
-        self.selected_label_toolbar.setObjectName("Tool.TLabel")
-        selection_layout.addWidget(self.selected_label_toolbar)
-        self.resume_all_button = QToolButton()
-        self.resume_all_button.setIcon(styles.make_icon("play", styles.palette(self.theme)["text"]))
-        self.resume_all_button.setToolTip("Continue the selected downloads")
-        self.resume_all_button.clicked.connect(self._resume_selected)
-        selection_layout.addWidget(self.resume_all_button)
-        self.pause_all_button = QToolButton()
-        self.pause_all_button.setIcon(styles.make_icon("pause", styles.palette(self.theme)["text"]))
-        self.pause_all_button.setToolTip("Pause the selected downloads")
-        self.pause_all_button.clicked.connect(self._pause_selected)
-        selection_layout.addWidget(self.pause_all_button)
-        self.remove_all_button = QToolButton()
-        self.remove_all_button.setIcon(styles.make_icon("trash", styles.palette(self.theme)["text"]))
-        self.remove_all_button.setToolTip("Delete the selected downloads")
-        self.remove_all_button.clicked.connect(self._delete_selected)
-        selection_layout.addWidget(self.remove_all_button)
-        self.selection_bar.setVisible(False)
-        bar.addWidget(self.selection_bar)
-
-        self.add_button = QPushButton("+ Add download")
-        self.add_button.setObjectName("Accent")
-        self.add_button.setIcon(styles.make_icon("plus", styles.palette(self.theme)["accent_text"]))
-        self.add_button.clicked.connect(self._add_download)
-        bar.addWidget(self.add_button)
-
-        bar.addStretch(1)
-
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Search in downloads...")
-        self.search_icon = QAction("Search", self)
-        self.search_icon.setIcon(styles.make_icon("search", styles.palette(self.theme)["muted"]))
-        self.search_edit.addAction(self.search_icon, QLineEdit.LeadingPosition)
-        self.search_edit.setFixedWidth(260)
-        self.search_edit.textChanged.connect(self._on_search)
-        bar.addWidget(self.search_edit)
-
-        self.menu_button = QToolButton()
-        self.menu_button.setText("≡")
-        self.menu_button.setFixedSize(30, 30)
-        self.menu_button.setToolTip("Main menu")
-        self.menu_button.clicked.connect(self._show_main_menu)
-        bar.addWidget(self.menu_button)
-
-        layout.addWidget(toolbar)
-        self.toolbar = toolbar
-
-        # the sidebar with the categories, the table on the right
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-
-        sidebar = QFrame()
-        sidebar.setObjectName("Sidebar")
-        sidebar.setFixedWidth(196)
-        side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(8, 10, 8, 10)
-        side_layout.setSpacing(2)
-        self.sidebar_list = QListWidget()
-        self.sidebar_list.setObjectName("SidebarList")
-        self.sidebar_list.setFrameShape(QFrame.NoFrame)
-        self.sidebar_list.setFocusPolicy(Qt.StrongFocus)
-        self.sidebar_list.currentRowChanged.connect(self._on_category)
-        for name in CATEGORIES:
-            item = QListWidgetItem(name)
-            self.sidebar_list.addItem(item)
-        side_layout.addWidget(self.sidebar_list, 1)
-        side_layout.addStretch(0)
-        body.addWidget(sidebar)
-
-        # download area: the table on top, the drop zone below it
+        # the list of the downloads
         area = QFrame()
         area.setObjectName("DownloadArea")
         area_layout = QVBoxLayout(area)
         area_layout.setContentsMargins(1, 1, 1, 1)
         area_layout.setSpacing(0)
-        outer = QVBoxLayout()
-        outer.setContentsMargins(10, 8, 10, 8)
 
         self.table = DownloadTableView()
         self.table.setModel(self.model)
@@ -695,6 +734,7 @@ class ArkLoadMainWindow(QMainWindow):
         self.table.doubleClicked.connect(self._open_selected)
         self.table.pause_requested.connect(self._toggle_selected_pause)
         self.table.cancel_requested.connect(self._cancel_selected)
+        self.table.delete_requested.connect(self._delete_selected)
         self.model.rowsInserted.connect(self._on_rows_changed)
         self.model.rowsRemoved.connect(self._on_rows_changed)
         self.model.modelReset.connect(self._on_rows_changed)
@@ -705,15 +745,24 @@ class ArkLoadMainWindow(QMainWindow):
         header.setSectionResizeMode(DownloadTableModel.COLUMN_STATUS, QHeaderView.Fixed)
         header.setSectionResizeMode(DownloadTableModel.COLUMN_DOWN, QHeaderView.Fixed)
         header.setSectionResizeMode(DownloadTableModel.COLUMN_UP, QHeaderView.Fixed)
+        header.setSectionResizeMode(DownloadTableModel.COLUMN_ETA, QHeaderView.Fixed)
         header.setSectionResizeMode(DownloadTableModel.COLUMN_ADDED, QHeaderView.Fixed)
         header.setSectionResizeMode(DownloadTableModel.COLUMN_ACTIONS, QHeaderView.Fixed)
-        self.table.setColumnWidth(DownloadTableModel.COLUMN_INDEX, 36)
-        self.table.setColumnWidth(DownloadTableModel.COLUMN_SIZE, 80)
-        self.table.setColumnWidth(DownloadTableModel.COLUMN_STATUS, 210)
-        self.table.setColumnWidth(DownloadTableModel.COLUMN_DOWN, 85)
+        self.table.setColumnWidth(DownloadTableModel.COLUMN_INDEX, 42)
+        self.table.setColumnWidth(DownloadTableModel.COLUMN_SIZE, 90)
+        self.table.setColumnWidth(DownloadTableModel.COLUMN_STATUS, 240)
+        self.table.setColumnWidth(DownloadTableModel.COLUMN_DOWN, 90)
         self.table.setColumnWidth(DownloadTableModel.COLUMN_UP, 80)
-        self.table.setColumnWidth(DownloadTableModel.COLUMN_ADDED, 120)
-        self.table.setColumnWidth(DownloadTableModel.COLUMN_ACTIONS, 30)
+        self.table.setColumnWidth(DownloadTableModel.COLUMN_ETA, 84)
+        self.table.setColumnWidth(DownloadTableModel.COLUMN_ADDED, 118)
+        self.table.setColumnWidth(DownloadTableModel.COLUMN_ACTIONS, 40)
+        self.table.verticalHeader().setDefaultSectionSize(48)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setSelectionBehavior(QTableView.SelectRows)
+        self.table.setSelectionMode(QTableView.ExtendedSelection)
         self.name_delegate = NameDelegate(self.table)
         self.name_delegate.colours = dict(styles.palette(self.theme))
         self.name_delegate.expanded_requested.connect(self._on_row_expanded)
@@ -724,19 +773,202 @@ class ArkLoadMainWindow(QMainWindow):
         self.table.setItemDelegateForColumn(DownloadTableModel.COLUMN_STATUS, self.status_delegate)
         area_layout.addWidget(self.table)
 
-        self.drop_zone = DropZone()
+        self.drop_zone = DropArea()
         area_layout.addWidget(self.drop_zone, 1)
-        body.addWidget(area, 1)
-        outer.addLayout(body, 1)
+        self.pages.addWidget(area)
+
+        # the link grabber of JDownloader 2
+        self.grabber_model = LinkGrabberModel(self)
+        self.grabber_table = QTableView()
+        self.grabber_table.setObjectName("GrabberTable")
+        self.grabber_table.setModel(self.grabber_model)
+        self.grabber_table.setSelectionBehavior(QTableView.SelectRows)
+        self.grabber_table.setEditTriggers(QTableView.NoEditTriggers)
+        self.grabber_table.verticalHeader().setVisible(False)
+        self.grabber_table.verticalHeader().setDefaultSectionSize(38)
+        self.grabber_table.setShowGrid(False)
+        self.grabber_table.setAlternatingRowColors(True)
+        self.grabber_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.grabber_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.grabber_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.grabber_table.setColumnWidth(1, 110)
+        self.grabber_table.setColumnWidth(2, 130)
+        self.grabber_table.doubleClicked.connect(self._start_grabbed_link)
+        self.grabber_table.setToolTip("The links that wait for their turn - a double click "
+                                       "starts one of them.")
+        grabber = QFrame()
+        grabber.setObjectName("DownloadArea")
+        grabber_layout = QVBoxLayout(grabber)
+        grabber_layout.setContentsMargins(1, 1, 1, 1)
+        grabber_layout.setSpacing(0)
+        grabber_layout.addWidget(self.grabber_table)
+        self.grabber_empty = QLabel("Nothing is waiting - every link is either running or done.")
+        self.grabber_empty.setObjectName("Muted")
+        self.grabber_empty.setAlignment(Qt.AlignCenter)
+        self.grabber_empty.setVisible(False)
+        grabber_layout.addWidget(self.grabber_empty, 1)
+
+        # the input of JDownloader 2: a link can be pasted into the grabber
+        add_row = QHBoxLayout()
+        add_row.setContentsMargins(10, 8, 10, 8)
+        add_row.setSpacing(8)
+        add_label = QLabel("Add new links")
+        add_label.setObjectName("Muted")
+        add_row.addWidget(add_label)
+        self.grabber_edit = QLineEdit()
+        self.grabber_edit.setPlaceholderText("Paste a link here and press Enter.")
+        self.grabber_edit.returnPressed.connect(self._add_grabbed_links)
+        add_row.addWidget(self.grabber_edit, 1)
+        grabber_layout.addLayout(add_row)
+        self.pages.addWidget(grabber)
+
+        outer.addWidget(self.pages, 1)
 
         self.details = DetailsPanel()
         self.details.priority_requested.connect(self._show_priority_menu)
         self.details.setVisible(False)        # collapsed, like the reference
         outer.addWidget(self.details)
 
+        # the numbers of the whole list, the way JDownloader 2 shows them
+        self.overview = OverviewBar()
+        outer.addWidget(self.overview)
+
         layout.addLayout(outer)
         self.download_area = area
         return page
+
+    # -- the head of the window ------------------------------------------------
+
+    def _build_command_bar(self) -> QWidget:
+        """The bar with the commands of JDownloader 2 and the actions of Free Download Manager.
+
+        On the left are the buttons that work on the downloads (start, pause, stop, add), on the
+        right the main action, the search field and the menu.
+        """
+        bar = QFrame()
+        bar.setObjectName("Toolbar")
+        self.toolbar = bar
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 7, 12, 7)
+        row.setSpacing(6)
+
+        self.start_all_button = QToolButton()
+        self.start_all_button.setIcon(styles.make_icon("play",
+                                                       styles.palette(self.theme)["text"]))
+        self.start_all_button.setToolTip("Start every download that is waiting")
+        self.start_all_button.clicked.connect(self._start_all)
+        row.addWidget(self.start_all_button)
+
+        self.pause_all_button = QToolButton()
+        self.pause_all_button.setIcon(styles.make_icon("pause",
+                                                       styles.palette(self.theme)["text"]))
+        self.pause_all_button.setToolTip("Pause every download that is running")
+        self.pause_all_button.clicked.connect(self._pause_all)
+        row.addWidget(self.pause_all_button)
+
+        self.stop_all_button = QToolButton()
+        self.stop_all_button.setIcon(styles.make_icon("stop",
+                                                      styles.palette(self.theme)["text"]))
+        self.stop_all_button.setToolTip("Stop every download")
+        self.stop_all_button.clicked.connect(self._stop_all)
+        row.addWidget(self.stop_all_button)
+
+        row.addWidget(self._bar_separator())
+
+        self.add_links_button = QToolButton()
+        self.add_links_button.setIcon(styles.make_icon("plus",
+                                                       styles.palette(self.theme)["text"]))
+        self.add_links_button.setToolTip("Add a link")
+        self.add_links_button.clicked.connect(self._add_download)
+        row.addWidget(self.add_links_button)
+
+        row.addSpacing(14)
+
+        # the pills of the sort, the filter and the selection
+        self.sort_button = self._make_pill("sort", SORT_MODES, self._on_sort)
+        row.addWidget(self.sort_button)
+        row.addSpacing(6)
+        self.filter_button = self._make_pill("filter", FILTER_MODES, self._on_filter)
+        row.addWidget(self.filter_button)
+        row.addSpacing(6)
+        self.selection_mode = "All"
+        self.selection_button = self._make_pill("checkbox", SELECTION_MODES,
+                                                self._on_selection_mode)
+        row.addWidget(self.selection_button)
+
+        row.addStretch(1)
+
+        self.add_button = QPushButton("Add download")
+        self.add_button.setObjectName("AccentSmall")
+        self.add_button.setIcon(styles.make_icon("plus",
+                                                  styles.palette(self.theme)["accent_text"]))
+        self.add_button.setToolTip("Add a link (Ctrl+V pastes the links of the clipboard)")
+        self.add_button.clicked.connect(self._add_download)
+        row.addWidget(self.add_button)
+        row.addSpacing(16)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search in downloads...")
+        self.search_icon = QAction("Search", self)
+        self.search_icon.setIcon(styles.make_icon("search", styles.palette(self.theme)["muted"]))
+        self.search_edit.addAction(self.search_icon, QLineEdit.LeadingPosition)
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setFixedWidth(260)
+        self.search_edit.textChanged.connect(self._on_search)
+        row.addWidget(self.search_edit)
+
+        self.menu_button = QToolButton()
+        self.menu_button.setIcon(styles.make_icon("menu", styles.palette(self.theme)["text"]))
+        self.menu_button.setFixedSize(32, 32)
+        self.menu_button.setToolTip("Main menu")
+        self.menu_button.clicked.connect(self._show_main_menu)
+        row.addWidget(self.menu_button)
+        return bar
+
+    def _build_navigation_bar(self) -> QWidget:
+        """The row with the tabs of JDownloader 2 and the pills of Free Download Manager.
+
+        The tabs switch between the downloads, the link grabber and the history; the pills on the
+        right sort and filter the list.
+        """
+        bar = QFrame()
+        bar.setObjectName("ToolStrip")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 0, 12, 0)
+        row.setSpacing(6)
+
+        self.tabs = TabStrip()
+        for name, icon in zip(TABS, TAB_ICONS):
+            self.tabs.add_tab(name, icon)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        row.addWidget(self.tabs)
+
+        row.addStretch(1)
+
+        row.addStretch(1)
+
+        # the quiet line with the numbers of the list
+        self.summary_label = QLabel("")
+        self.summary_label.setObjectName("Faint")
+        row.addWidget(self.summary_label)
+        return bar
+
+    def _make_pill(self, icon_name: str, modes: tuple, handler) -> QToolButton:
+        """A button that shows the current mode and opens the list of the other ones."""
+        button = QToolButton()
+        button.setObjectName("Pill")
+        button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        button.setPopupMode(QToolButton.InstantPopup)
+        button.setIcon(styles.make_icon(icon_name, styles.palette(self.theme)["muted"]))
+        menu = QMenu(self)
+        for mode in modes:
+            action = menu.addAction(mode)
+            action.setCheckable(True)
+            action.triggered.connect(lambda _checked=False, value=mode: handler(value))
+        button.setMenu(menu)
+        button.setText(modes[0])
+        button.pill_actions = {mode: action for mode, action in zip(modes, menu.actions())}
+        return button
 
     # -- preferences ----------------------------------------------------------
     def _build_preferences(self) -> QWidget:
@@ -778,21 +1010,28 @@ class ArkLoadMainWindow(QMainWindow):
 
     # -- status bar -----------------------------------------------------------
     def _build_status_bar(self) -> QWidget:
-        """The slim bar at the bottom: limiter, live speeds, priority and the selection."""
+        """The bar at the bottom: the limiter, the speeds, the priority and the selection.
+
+        It is built in groups that thin lines separate: what the user sets on the left, what
+        happens on the right.
+        """
         bar = QFrame()
         bar.setObjectName("StatusBar")
         self.status = bar
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setContentsMargins(14, 6, 14, 6)
         layout.setSpacing(10)
 
-        # the speed limiter - a chip that shows the current limit and opens the presets
+        # -- the limiter: a flat control that opens the presets
         self.limiter_button = QToolButton()
         self.limiter_button.setText("OFF")
-        self.limiter_button.setIcon(styles.make_icon("snail", styles.palette(self.theme)["muted"]))
-        self.limiter_button.setToolTip("Speed limiter")
+        self.limiter_button.setIcon(styles.make_icon("snail",
+                                                     styles.palette(self.theme)["muted"]))
+        self.limiter_button.setToolTip("The speed limit of the transfers")
         self.limiter_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.limiter_button.setPopupMode(QToolButton.InstantPopup)
+        self.limiter_button.setObjectName("Limiter")
+        self.limiter_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.limiter_menu = QMenu(self)
         self.limiter_menu.setToolTipsVisible(True)
         for label, value in RATE_PRESETS:
@@ -803,42 +1042,60 @@ class ArkLoadMainWindow(QMainWindow):
         self.limiter_button.setMenu(self.limiter_menu)
         layout.addWidget(self.limiter_button)
 
+        # the priority is changed in the menu of the row; the button is only the shortcut
+        self.priority_button = QPushButton(PRIORITY_HIGH)
+        self.priority_button.setObjectName("Priority")
+        self.priority_button.setToolTip("The traffic priority of the selected downloads")
+        self.priority_button.clicked.connect(self._show_priority_menu)
+        self.priority_button.setVisible(False)
+
         self.gear_button = QToolButton()
         self.gear_button.setIcon(styles.make_icon("gear", styles.palette(self.theme)["muted"]))
-        self.gear_button.setFixedSize(24, 24)
+        self.gear_button.setFixedSize(28, 28)
         self.gear_button.setToolTip("Preferences")
         self.gear_button.clicked.connect(self._show_preferences)
         layout.addWidget(self.gear_button)
 
-        self.down_speed_label = QLabel("▼ 0 B/s")
-        self.up_speed_label = QLabel("▲ 0 B/s")
+        layout.addWidget(self._bar_separator())
+
+        # -- the live speeds
+        self.down_speed_label = QLabel("0 B/s")
+        self.up_speed_label = QLabel("0 B/s")
         self.down_speed_label.setObjectName("Speed.TLabel")
         self.up_speed_label.setObjectName("Speed.TLabel")
-        self.down_speed_label.setToolTip("Download speed")
-        self.up_speed_label.setToolTip("Upload speed")
+        self.down_speed_label.setToolTip("The speed of all the downloads together")
+        self.up_speed_label.setToolTip("The upload speed")
         layout.addWidget(self.down_speed_label)
         layout.addWidget(self.up_speed_label)
 
         self.message_label = QLabel("")
-        self.message_label.setObjectName("StatusMuted.TLabel")
+        self.message_label.setObjectName("Faint")
         layout.addWidget(self.message_label)
-
-        self.priority_button = QPushButton(PRIORITY_HIGH)
-        self.priority_button.setObjectName("Priority")
-        self.priority_button.setToolTip("Traffic priority")
-        self.priority_button.clicked.connect(self._show_priority_menu)
-        layout.addWidget(self.priority_button)
 
         layout.addStretch(1)
 
+        # -- the download that is selected
+        self.selected_label = QLabel("")
+        self.selected_label.setObjectName("Muted")
+        layout.addWidget(self.selected_label)
+
         self.details_button = QToolButton()
-        self.details_button.setText("")
-        self.details_button.setStyleSheet("background: transparent; border: none; color: "
-                                          + styles.palette(self.theme)["muted"] + ";")
+        self.details_button.setIcon(styles.make_icon("chevron",
+                                                     styles.palette(self.theme)["muted"]))
+        self.details_button.setFixedSize(26, 26)
         self.details_button.setToolTip("Show the details of the selected download")
         self.details_button.clicked.connect(self._toggle_details)
         layout.addWidget(self.details_button)
         return bar
+
+    @staticmethod
+    def _bar_separator() -> QFrame:
+        """A thin line that separates the groups of the bottom bar."""
+        line = QFrame()
+        line.setObjectName("Separator")
+        line.setFixedWidth(1)
+        line.setFixedHeight(18)
+        return line
 
     # ------------------------------------------------------------------ theme
 
@@ -854,14 +1111,61 @@ class ArkLoadMainWindow(QMainWindow):
             self.status_delegate.colours = dict(colours)
         if hasattr(self, "name_delegate"):
             self.name_delegate.colours = dict(colours)
-        for widget, icon in ((self.sort_combo, "sort"), (self.filter_combo, "filter")):
-            picture = styles.make_icon(icon, colours["muted"])
-            for index in range(widget.count()):
-                widget.setItemIcon(index, picture)
+        for button, icon in ((self.sort_button, "sort"), (self.filter_button, "filter")):
+            button.setIcon(styles.make_icon(icon, colours["muted"]))
+        for button, icon in ((self.start_all_button, "play"), (self.pause_all_button, "pause"),
+                             (self.stop_all_button, "stop"), (self.add_links_button, "plus")):
+            button.setIcon(styles.make_icon(icon, colours["text"]))
         self.search_icon.setIcon(styles.make_icon("search", colours["muted"]))
+        if hasattr(self, "tabs"):
+            self.tabs.set_icon_colour(colours["muted"])
         self.add_button.setIcon(styles.make_icon("plus", colours["accent_text"]))
         self.limiter_button.setIcon(styles.make_icon("snail", colours["muted"]))
         self._save_settings()
+
+    # -- the commands of the bars ---------------------------------------------
+
+    def _start_all(self) -> None:
+        """Start every download that waits."""
+        started = 0
+        for record in self.model.records():
+            if record.state in (TaskState.QUEUED, TaskState.PAUSED, TaskState.CANCELLED,
+                                TaskState.INTERRUPTED):
+                self.engine.start_record(record)
+                started += 1
+        self._on_engine_message(f"Started {started} download(s)" if started
+                                else "There is nothing to start")
+
+    def _pause_all(self) -> None:
+        """Pause every download that runs."""
+        paused = 0
+        for record in self.model.records():
+            if record.state == TaskState.RUNNING:
+                self.engine.pause(record)
+                paused += 1
+        self._on_engine_message(f"Paused {paused} download(s)" if paused
+                                else "There is nothing to pause")
+
+    def _stop_all(self) -> None:
+        """Stop every download."""
+        stopped = 0
+        for record in self.model.records():
+            if record.active:
+                self.engine.cancel(record)
+                stopped += 1
+        self._on_engine_message(f"Stopped {stopped} download(s)" if stopped
+                                else "There is nothing to stop")
+
+    def _remove_finished(self) -> None:
+        """Take the finished downloads out of the list."""
+        removed = 0
+        for record in list(self.model.records()):
+            if record.state.finished:
+                self.engine.remove_from_list(record, delete_files=False)
+                self.model.remove_record(record.job_id)
+                removed += 1
+        self._on_engine_message(f"Removed {removed} download(s)" if removed
+                                else "There is nothing to remove")
 
     # ------------------------------------------------------------------ engine
 
@@ -896,8 +1200,10 @@ class ArkLoadMainWindow(QMainWindow):
         """
         for record in self.engine.load_tasks():
             self.model.add_record(record)
-        self.model.set_sort(self.sort_combo.currentText())
-        self.model.set_filter(self.filter_combo.currentText())
+        self.model.set_sort(self.settings.get("sort") or SORT_MODES[0])
+        self.model.set_filter(self.settings.get("filter") or FILTER_MODES[0])
+        self.sort_button.setText(self.model.sort_mode)
+        self.filter_button.setText(self.model.filter_mode)
         self.model.set_selection_mode(self.selection_mode)
         self._toggle_table_visibility()
 
@@ -938,7 +1244,7 @@ class ArkLoadMainWindow(QMainWindow):
             self.engine.persist(record)
             self.addons.fire("status_change", record)
         self._update_details()
-        self._update_sidebar_counts()
+        self._refresh_grabber()
 
     def _maybe_exit(self) -> None:
         """Close the application when it was started with --exit-when-done."""
@@ -968,9 +1274,10 @@ class ArkLoadMainWindow(QMainWindow):
     def _on_stats(self, down: float, up: float, active: int, total: int) -> None:
         self.down_speed_label.setText(f"▼ {fmt_speed(down)}")
         self.up_speed_label.setText(f"▲ {fmt_speed(up)}")
-        colour = "#E8B84B" if (self.engine.options.slow_mode
-                                or self.engine.options.rate_limit) else "#22C55E"
-        self.down_speed_label.setStyleSheet(f"color: {colour};")
+        colours = styles.palette(self.theme)
+        colours = styles.palette(self.theme)
+        colour = (colours["warning"] if (self.engine.options.slow_mode
+                    or self.engine.options.rate_limit) else colours["success"])
         self.up_speed_label.setStyleSheet(f"color: {colour};")
         self._update_status_bar()
         if self._shutdown_armed and active == 0 and self._shutdown_jobs:
@@ -984,6 +1291,59 @@ class ArkLoadMainWindow(QMainWindow):
         if record is not None:
             self.model.update_record(record.job_id)
 
+    def _update_summary(self, active: int, total: int) -> None:
+        """The numbers of the list: the quiet line in the bar and the overview under it."""
+        if not hasattr(self, "summary_label"):
+            return
+        records = self.model.visible_records()
+        if not records:
+            self.summary_label.setText("No downloads yet")
+            self._update_overview(records, active)
+            return
+        size = sum(record.bytes_total or 0 for record in records)
+        parts = [f"{len(records)} download{'s' if len(records) != 1 else ''}"]
+        if active:
+            parts.append(f"{active} active")
+        if size:
+            parts.append(fmt_size(size))
+        self.summary_label.setText(" · ".join(parts))
+        self._update_overview(records, active)
+
+    def _update_overview(self, records: list, active: int) -> None:
+        """The overview of JDownloader 2: the numbers of the whole list."""
+        if not hasattr(self, "overview"):
+            return
+        if self.tabs.currentIndex() == TABS.index(TAB_GRABBER):
+            # the grabber shows the links that wait, not the downloads
+            rows = self.grabber_model.rows() if hasattr(self, "grabber_model") else []
+            size = sum(int(row.get("size") or 0) for row in rows)
+            self.overview.show_values({
+                "packages": len(rows),
+                "speed": "—",
+                "loaded": fmt_size(size),
+                "eta": "—",
+                "connections": "—",
+                "running": len(rows),
+            })
+            return
+        speed = sum(record.speed_down or 0 for record in records)
+        loaded = sum(record.bytes_done or 0 for record in records)
+        # the time that is left is the slowest download of the list
+        left = 0.0
+        for record in records:
+            if not record.active or record.speed_down <= 0 or not record.bytes_total:
+                continue
+            left = max(left, (record.bytes_total - record.bytes_done) / record.speed_down)
+        connections = int(self.engine.options.connections or 1) * active
+        self.overview.show_values({
+            "packages": len(records),
+            "speed": fmt_speed(speed),
+            "loaded": fmt_size(loaded),
+            "eta": fmt_duration(left) if left > 0 else "—",
+            "connections": connections,
+            "running": active,
+        })
+
     def _update_status_bar(self) -> None:
         """The bar shows the limiter, the priority and the selection, the way the reference does."""
         total = len(self.model.records())
@@ -994,10 +1354,12 @@ class ArkLoadMainWindow(QMainWindow):
         self._apply_snail_mode()
         priority = self._priority_of_selection()
         self.priority_button.setText(priority)
-        colour = {"HIGH": "#22C55E", "MEDIUM": "#E0A93A", "LOW": "#EF5F5F"}.get(priority,
-                                                                             "#22C55E")
+        colours = styles.palette(self.theme)
+        colours = styles.palette(self.theme)
+        colour = {"HIGH": colours["success"], "MEDIUM": colours["warning"], "LOW": colours["danger"]}.get(priority, colours["success"])
         self.priority_button.setStyleSheet(f"color: {colour}; border-color: {colour};")
         self._update_details_button()
+        self._update_summary(active, total)
 
     def _apply_snail_mode(self) -> None:
         """In snail mode the whole bar turns amber, the way the reference shows it."""
@@ -1018,15 +1380,21 @@ class ArkLoadMainWindow(QMainWindow):
 
     def _on_sort(self, text: str) -> None:
         self.model.set_sort(text)
+        self.sort_button.setText(text)
+        for mode, action in getattr(self.sort_button, "pill_actions", {}).items():
+            action.setChecked(mode == text)
         self._save_settings()
 
     def _on_filter(self, text: str) -> None:
         self.model.set_filter(text)
+        self.filter_button.setText(text)
+        for mode, action in getattr(self.filter_button, "pill_actions", {}).items():
+            action.setChecked(mode == text)
         self._save_settings()
 
     def _on_selection_mode(self, text: str) -> None:
         self.selection_mode = text
-        for mode, action in self.selection_actions.items():
+        for mode, action in getattr(self.selection_button, "pill_actions", {}).items():
             action.setChecked(mode == text)
         self.model.set_selection_mode(text)
         self._save_settings()
@@ -1036,14 +1404,11 @@ class ArkLoadMainWindow(QMainWindow):
         self._toggle_table_visibility()
 
     def _toggle_select_all(self, checked: bool) -> None:
+        """Select every download of the list, or none of them."""
         if checked:
             self.table.selectAll()
         else:
             self.table.clearSelection()
-        colours = styles.palette(self.theme)
-        self.select_all_button.setIcon(styles.make_icon(
-            "checkbox_checked" if checked else "checkbox", colours["accent"] if checked
-            else colours["text"]))
 
     def _set_rate_limit(self, limit: int) -> None:
         """Set the real bandwidth limit (bytes per second, 0 means unlimited)."""
@@ -1077,15 +1442,19 @@ class ArkLoadMainWindow(QMainWindow):
         dialog = DeleteDownloadsDialog(self, selected)
         if dialog.exec() != DeleteDownloadsDialog.Accepted:
             return
+        deleted = 0
         if dialog.delete_files:
             for record in selected:
                 if record.root and Path(record.root).exists():
                     shutil.rmtree(record.root, ignore_errors=True)
+                    deleted += 1
         for record in selected:
             self.engine.remove_from_list(record, delete_files=False)
             self.model.remove_record(record.job_id)
-        self.rebuild_tree()
+        self._toggle_table_visibility()
         self._update_status_bar()
+        if deleted:
+            self._on_engine_message(f"Deleted {deleted} download(s) and their files")
 
     def _show_priority_menu(self, position: QPoint | None = None) -> None:
         menu = QMenu(self)
@@ -1200,109 +1569,121 @@ class ArkLoadMainWindow(QMainWindow):
             self._cancel_record(record)
 
     def _on_context_menu(self, position: QPoint) -> None:
-        """The right click menu of a row (position is inside the table)."""
-        self._show_row_menu(self.table.viewport().mapToGlobal(position))
+        """The right click menu of the row under the cursor.
+
+        The row under the cursor becomes the selected one, so the menu always belongs to the
+        download the user pointed at - the way the file manager does it.  A right click on the
+        empty space keeps the selection and opens the menu of the selected download.
+        """
+        index = self.table.indexAt(position)
+        if index.isValid():
+            self.table.setCurrentIndex(index)
+            if not self.table.selectionModel().isRowSelected(index.row()):
+                self.table.selectRow(index.row())
+            record = self.model.record_at(index.row())
+        else:
+            selected = self._selected_records()
+            record = selected[0] if selected else None
+        if record is None:
+            return
+        self._show_row_menu(self.table.viewport().mapToGlobal(position), record)
 
     def _on_actions_clicked(self, position: QPoint) -> None:
         """The three dot button of a row."""
-        self._show_row_menu(self.table.viewport().mapToGlobal(position))
+        index = self.table.indexAt(position)
+        record = self.model.record_at(index.row()) if index.isValid() else None
+        self._show_row_menu(self.table.viewport().mapToGlobal(position), record)
+
+    def _show_row_menu(self, position: QPoint, record: DownloadRecord | None = None) -> None:
+        """Show the menu of one download at the given position."""
+        if record is None:
+            index = self.table.currentIndex()
+            record = self.model.record_at(index.row()) if index.isValid() else None
+        if record is None:
+            return
+        self._build_row_menu(record).exec(position)
 
     def _build_row_menu(self, record: DownloadRecord) -> QMenu:
-        """The context menu of one download, in the order of the reference."""
+        """The menu of one download, in the order of the reference.
+
+        The items are grouped: the file, the transfer, the list and the link.
+        """
         menu = QMenu(self)
-        # the MediaFire downloads are verified against MediaFire's own hash, the downloads of
+        # the downloads of ArkLoad are verified against the hash of the source, the downloads of
         # the JDownloader engine are not - the actions that need it are only offered when it
         # applies
-        mediafire = getattr(record, "backend", "arkload") == "arkload"
+        own_engine = getattr(record, "backend", "arkload") == "arkload"
 
-        # the download controls, the state decides what can be used
+        # the state of the download decides what can be used
         running = record.status in (RUNNING, "downloading")
         paused = record.status == "paused"
+        stopped = record.status in ("cancelled", "failed", "incomplete")
+        # the file is there when there is something to open
+        has_file = bool(record.root) and Path(record.root).exists()
+
+        # -- the file
+        open_action = menu.addAction("Open")
+        open_action.setEnabled(has_file)
+        open_action.triggered.connect(lambda: self._open_record(record))
+        show_action = menu.addAction("Show in folder")
+        show_action.setEnabled(has_file)
+        show_action.triggered.connect(lambda: self._show_in_folder(record))
+        menu.addSeparator()
+
+        # -- the transfer
         pause_action = menu.addAction("Pause")
         pause_action.setEnabled(running and not paused)
         pause_action.triggered.connect(lambda: self._pause_record(record))
         resume_action = menu.addAction("Resume")
-        resume_action.setEnabled(paused or not running)
+        resume_action.setEnabled(paused or stopped or not running)
         resume_action.triggered.connect(lambda: self._resume_record(record))
         cancel_action = menu.addAction("Cancel")
         cancel_action.setEnabled(running or paused)
         cancel_action.triggered.connect(lambda: self._cancel_record(record))
         menu.addSeparator()
 
-        open_action = menu.addAction("Open")
-        open_action.setEnabled(bool(record.root))
-        open_action.triggered.connect(lambda: self._open_record(record))
-
-        show_action = menu.addAction("Show in folder")
-        show_action.setEnabled(bool(record.root))
-        show_action.triggered.connect(lambda: self._show_in_folder(record))
-
+        # -- the list
         priority_menu = menu.addMenu("Set priority")
         for priority in (PRIORITY_HIGH, PRIORITY_MEDIUM, PRIORITY_LOW):
             action = priority_menu.addAction(priority)
+            action.setChecked(priority == record.priority)
             action.triggered.connect(lambda _checked=False, value=priority:
                                      self.engine.set_priority(record, value))
-
         rename_action = menu.addAction("Rename file")
-        rename_action.setEnabled(bool(record.root))
+        rename_action.setEnabled(has_file)
         rename_action.triggered.connect(lambda: self._rename_record(record))
-
         move_action = menu.addAction("Move to...")
-        move_action.setEnabled(bool(record.root))
+        move_action.setEnabled(has_file)
         move_action.triggered.connect(lambda: self._move_record(record))
-
         delete_action = menu.addAction("Delete file")
-        delete_action.setEnabled(bool(record.root))
+        delete_action.setEnabled(has_file)
         delete_action.triggered.connect(lambda: self._delete_files(record))
-
         remove_action = menu.addAction("Remove from list")
         remove_action.triggered.connect(lambda: self._remove_from_list(record))
         menu.addSeparator()
 
-        mirror = menu.addAction("Add mirror")
-        mirror.setEnabled(mediafire)
-        if not mediafire:
-            mirror.setToolTip("A mirror is a second MediaFire link with the same files.")
-        mirror.triggered.connect(lambda: self._add_mirror(record))
-
+        # -- the link
         page_action = menu.addAction("Open download page")
         page_action.triggered.connect(lambda: open_url(record.url))
-
         copy_action = menu.addAction("Copy link")
         copy_action.triggered.connect(lambda: QApplication.clipboard().setText(record.url))
-
-        update_action = menu.addAction("Check for update")
-        update_action.setEnabled(mediafire)
-        if not mediafire:
-            update_action.setToolTip("Only MediaFire downloads can be compared with their source.")
-        update_action.triggered.connect(lambda: self._check_record_update(record))
-
-        export_action = menu.addAction("Export selected downloads")
-        export_action.triggered.connect(self._export_downloads)
-
-        integrity_action = menu.addAction("File integrity")
-        integrity_action.triggered.connect(lambda: self._show_integrity(record))
         menu.addSeparator()
 
+        # -- the download itself
+        integrity_action = menu.addAction("File integrity")
+        integrity_action.setEnabled(bool(record.files))
+        if not record.files:
+            integrity_action.setToolTip("Nothing has been downloaded yet.")
+        integrity_action.triggered.connect(lambda: self._show_integrity(record))
         schedule_action = menu.addAction("Schedule")
         schedule_action.triggered.connect(lambda: self._schedule_record(record))
-
         change_action = menu.addAction("Change URL")
         change_action.triggered.connect(lambda: self._change_url(record))
-
-        for name, kind in (("Convert to mp3", "mp3"), ("Convert to mp4", "mp4")):
-            action = menu.addAction(name)
-            action.triggered.connect(lambda _checked=False, value=kind:
-                                     self._convert_record(record, value))
-
-        virus = menu.addAction("Perform virus check")
-        virus.setEnabled(False)
-        virus.setToolTip("No virus scanner is available on this machine.")
-
-        tag_menu = menu.addMenu("Add tag")
-        tag_action = tag_menu.addAction("Tags...")
-        tag_action.triggered.connect(lambda: self._edit_tags(record))
-
+        if own_engine:
+            mirror = menu.addAction("Add mirror")
+            mirror.triggered.connect(lambda: self._add_mirror(record))
+            update_action = menu.addAction("Check for update")
+            update_action.triggered.connect(lambda: self._check_record_update(record))
         return menu
 
     # ------------------------------------------------------------------ actions
@@ -1559,6 +1940,7 @@ class ArkLoadMainWindow(QMainWindow):
             self.details.setVisible(True)     # clicking a row opens the card
         self._update_details()
         self._update_selection_mode()
+        self._update_details_button()
 
     def _toggle_details(self) -> None:
         """The arrow in the status bar opens and closes the details card."""
@@ -1567,13 +1949,18 @@ class ArkLoadMainWindow(QMainWindow):
         self._update_details_button()
 
     def _update_details_button(self) -> None:
-        """The button shows the name of the selected download and the arrow."""
+        """The name of the selected download and the button that opens its details."""
         selected = self._selected_records()
         record = selected[0] if selected else (self.model.records()[0]
                                                if self.model.records() else None)
-        arrow = "▼" if self.details.isVisible() else "▲"
         name = record.title if record is not None else ""
-        self.details_button.setText(f"{name} {arrow}".strip())
+        self.selected_label.setText(name)
+        colours = styles.palette(self.theme)
+        self.details_button.setIcon(styles.make_icon(
+            "chevron_up" if self.details.isVisible() else "chevron", colours["muted"]))
+        self.details_button.setToolTip(
+            "Hide the details of the selected download" if self.details.isVisible()
+            else "Show the details of the selected download")
 
     def _update_details(self) -> None:
         """The details panel shows the download that is selected (or the first one)."""
@@ -1588,15 +1975,8 @@ class ArkLoadMainWindow(QMainWindow):
         self._update_details_button()
 
     def _update_selection_mode(self) -> None:
-        """The toolbar shows the selection actions, the way the reference does."""
-        selected = self._selected_records()
-        self.selection_bar.setVisible(bool(selected))
-        if selected:
-            total = sum(record.bytes_total for record in selected)
-            self.selected_label_toolbar.setText(
-                f"{len(selected)} selected · {fmt_size(total) if total else '0 B'}")
-        for button in (self.resume_all_button, self.pause_all_button, self.remove_all_button):
-            button.setEnabled(bool(selected))
+        """The list shows what the selection mode says."""
+        self._update_details_button()
 
     def _show_row_menu_at_selection(self) -> None:
         index = self.table.currentIndex()
@@ -1664,16 +2044,29 @@ class ArkLoadMainWindow(QMainWindow):
             QMessageBox.warning(self, "Move to…", "The download could not be moved.")
 
     def _delete_files(self, record: DownloadRecord) -> None:
+        """Delete the files of a download and take it out of the list."""
         answer = QMessageBox.question(
             self, "Delete file",
-            f"Delete the downloaded files of '{record.title}'?\n\n"
-            "The entry stays in the list and can be downloaded again.",
+            f"Delete the files of '{record.title}'?\n\n"
+            "The download is taken out of the list as well.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if answer != QMessageBox.Yes:
             return
         if record.root and Path(record.root).exists():
             shutil.rmtree(record.root, ignore_errors=True)
-        self._on_engine_message(f"Deleted the files of {record.title}")
+        self.engine.remove_from_list(record, delete_files=True)
+        self.model.remove_record(record.job_id)
+        self._toggle_table_visibility()
+        self._update_status_bar()
+        self._on_engine_message(f"Deleted {record.title}")
+
+    def _edit_tags_of_the_selection(self) -> None:
+        """The tags of the download that is selected."""
+        selected = self._selected_records()
+        if not selected:
+            self._on_engine_message("Select a download first")
+            return
+        self._edit_tags(selected[0])
 
     def _remove_from_list(self, record: DownloadRecord) -> None:
         answer = QMessageBox.question(
@@ -1828,39 +2221,69 @@ class ArkLoadMainWindow(QMainWindow):
             return styles.make_icon("folder", colours["accent"])
         return styles.make_icon("file", colours["muted"])
 
-    def _on_category(self, row: int) -> None:
-        """The sidebar switches the list between the categories."""
-        if row < 0:
+    def _on_tab_changed(self, index: int) -> None:
+        """The tabs show the downloads, the collected links and the history."""
+        if index < 0 or index >= len(TABS):
             return
-        name = CATEGORIES[row] if row < len(CATEGORIES) else "All downloads"
-        if name == "Settings":
-            self._show_preferences()
-            return
-        self.model.set_category(name)
-        self._update_sidebar_counts()
+        name = TABS[index]
+        self.pages.setCurrentIndex(TAB_PAGES.get(name, 0))
+        self.model.set_category(TAB_CATEGORIES.get(name, ""))
         self._update_status_bar()
+        self._refresh_grabber()
+        if name == TAB_GRABBER:
+            self.details.setVisible(False)
+        else:
+            self.details.setVisible(bool(self._selected_records()))
 
-    def _update_sidebar_counts(self) -> None:
-        """Show how many downloads every category holds."""
-        for row, name in enumerate(CATEGORIES):
-            if row >= self.sidebar_list.count():
-                break
-            item = self.sidebar_list.item(row)
-            if item is None:
-                continue
-            if name == "Settings":
-                item.setText(name)
-                continue
-            count = self.model.count(name)
-            item.setText(f"{name}   {count}" if count else name)
+    def _refresh_grabber(self) -> None:
+        """Fill the link grabber with the links that wait for their turn."""
+        rows = []
+        for record in self.model.records():
+            if record.state == TaskState.QUEUED:
+                rows.append({"name": record.title, "size": record.bytes_total,
+                             "state": "Queued", "job_id": record.job_id})
+        try:
+            rows.extend(self.engine.collected_links())
+        except Exception:  # noqa: BLE001 - the grabber is a view, it may not break the app
+            pass
+        self.grabber_model.set_rows(rows)
+        if hasattr(self, "grabber_empty"):
+            self.grabber_empty.setVisible(not rows)
+
+    def _add_grabbed_links(self) -> None:
+        """Add the links that were pasted into the grabber."""
+        text = self.grabber_edit.text().strip()
+        if not text:
+            return
+        self.grabber_edit.clear()
+        self._add_urls([line.strip() for line in text.splitlines() if line.strip()])
+
+    def _start_grabbed_link(self, index) -> None:
+        """Start a link of the grabber (a double click on the row)."""
+        rows = self.grabber_model.rows()
+        row = index.row()
+        if row < 0 or row >= len(rows):
+            return
+        job_id = rows[row].get("job_id")
+        if not job_id:
+            self._on_engine_message("This link is already with the engine.")
+            return
+        record = self.model.record(job_id)
+        if record is None:
+            return
+        self.engine.start_record(record)
+        self._on_engine_message(f"{record.title} is starting")
 
     def _toggle_table_visibility(self) -> None:
-        self.table.setVisible(bool(self.model.records()))
+        """The list takes the place of the empty state as soon as there is something."""
+        has_records = bool(self.model.records())
+        self.table.setVisible(has_records)
+        self.drop_zone.setVisible(not has_records)
 
     def _on_rows_changed(self, *args) -> None:
         self._toggle_table_visibility()
         self._update_status_bar()
-        self._update_sidebar_counts()
+        self._refresh_grabber()
 
     def _save_settings(self) -> None:
         settings = self.settings
@@ -1878,10 +2301,11 @@ class ArkLoadMainWindow(QMainWindow):
             "slow_pause": self.engine.options.slow_pause,
             "rate_limit": self.engine.options.rate_limit,
             "connections": self.engine.options.connections,
+            "per_host": self.engine.options.per_host,
             "verify_hashes": self.engine.options.verify_hashes,
             "auto_resume": self.engine.options.auto_resume,
-            "sort": self.sort_combo.currentText(),
-            "filter": self.filter_combo.currentText(),
+            "sort": self.model.sort_mode,
+            "filter": self.model.filter_mode,
         })
         save_settings(settings)
 
