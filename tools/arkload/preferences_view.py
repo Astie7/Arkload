@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QPushButton, QRadioButton, QSpinBox, QStackedWidget, QVBoxLayout,
-                               QWidget)
+                               QPushButton, QRadioButton, QScrollArea, QSpinBox, QStackedWidget,
+                               QVBoxLayout, QWidget)
 
 from .download_engine import EngineOptions
 
@@ -59,6 +59,7 @@ class PreferencesView(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        # the sidebar is fixed: it never moves, whatever the page does
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
         sidebar.setFixedWidth(210)
@@ -73,10 +74,16 @@ class PreferencesView(QWidget):
         side_layout.addWidget(self.sidebar, 1)
         root.addWidget(sidebar)
 
+        # one scroll area for the whole page - the settings move with it
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.stack = QStackedWidget()
         for name in SECTIONS:
             self.stack.addWidget(self._page(name))
-        root.addWidget(self.stack, 1)
+        self.scroll.setWidget(self.stack)
+        root.addWidget(self.scroll, 1)
         self.sidebar.setCurrentRow(0)
 
     def _page(self, name: str) -> QWidget:
